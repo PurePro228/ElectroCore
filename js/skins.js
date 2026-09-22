@@ -1317,4 +1317,13 @@
     wideDip(g, c, function () { return EC.memFace(c); }, EC.MEM_PINS,
       c.powered && c.selected);
   };
+
+  real.sr595 = function (g, c) {
+    wideDip(g, c, function () { return EC.srFace(c); }, EC.SR_PINS, c.powered && c.enabled);
+  };
+
+  real.max7219 = function (g, c) {
+    wideDip(g, c, function () { return EC.maxFace(c); }, EC.MX_PINS,
+      c.powered && c.state && c.state.on);
+  };
 })(window);

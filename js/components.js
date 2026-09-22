@@ -2188,10 +2188,13 @@
   EC.NE555_PINS = NE555_PINS;
 
   /* Порядок разделов в палитре. */
-  var ORDER = ['passive', 'source', 'switch', 'semi', 'logic', 'actuator', 'meter'];
-  EC.categories.sort(function (a, b) {
-    return ORDER.indexOf(a.key) - ORDER.indexOf(b.key);
-  });
+  /* Порядок разделов задаётся один раз, когда все элементы объявлены. */
+  EC.sortCategories = function () {
+    var ORDER = ['passive', 'source', 'switch', 'semi', 'logic', 'display', 'actuator', 'meter'];
+    EC.categories.sort(function (a, b) {
+      return ORDER.indexOf(a.key) - ORDER.indexOf(b.key);
+    });
+  };
 })(window);
 
 /* ElectroCore — восьмибитный процессор EC-8 в корпусе DIP-8. */

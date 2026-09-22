@@ -4,7 +4,7 @@
 'use strict';
 const path = require('path');
 global.window = {};
-['util', 'solver', 'cpu', 'components', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
+['util', 'solver', 'cpu', 'components', 'display', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
   require(path.join(__dirname, '..', 'js', m + '.js'));
 });
 const EC = global.window.EC;
@@ -1366,6 +1366,233 @@ test('Калькулятор: два процессора считают и пе
   press(3);
   go(7);
   check('вторая операция считается заново', blinks, 2, 0);
+});
+
+/* ------------------------------------------------------------------ */
+/*  Индикаторы и микросхемы управления ими                             */
+/* ------------------------------------------------------------------ */
+
+test('Семисегментный индикатор показывает цифру', function () {
+  const S = EC.S1_SEG;
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -20, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -20, 16);
+  const hg = ct.add('seg7', 12, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(hg.id, EC.S1_COM[0], gnd.id, 0);
+  ['a', 'b', 'c', 'd', 'e', 'f'].forEach(function (s, k) {
+    const r = ct.add('resistor', -6, -8 + k * 3); r.props.R = 220;
+    ct.connect(bat.id, 0, r.id, 0);
+    ct.connect(r.id, 1, hg.id, S[s]);
+  });
+  ct.reset();
+  run(ct, 0.3, 2e-4);
+  check('горит ноль', hg.level === '0' ? 1 : 0, 1, 0);
+  check('ток сегмента (5−1,9)/220', hg.i / 6, (5 - 1.9) / 220, 4e-4);
+  check('перемычка g погашена', hg.state.lit[6] < 0.02 ? 1 : 0, 1, 0);
+
+  // добавляем среднюю перемычку — получается восьмёрка
+  const r = ct.add('resistor', -6, 12); r.props.R = 220;
+  ct.connect(bat.id, 0, r.id, 0);
+  ct.connect(r.id, 1, hg.id, S.g);
+  ct.reset();
+  run(ct, 0.3, 2e-4);
+  check('горит восьмёрка', hg.level === '8' ? 1 : 0, 1, 0);
+});
+
+/** Собирает стенд со сдвиговым регистром и источниками на его входах. */
+function shiftRig() {
+  const SR = EC.SR;
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -30, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -30, 20);
+  const u = ct.add('sr595', 0, 0);
+  ct.connect(bat.id, 0, u.id, SR.VCC);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(u.id, SR.GND, gnd.id, 0);
+  const src = {};
+  ['SER', 'SRCLK', 'RCLK', 'OE', 'SRCLR'].forEach(function (k, i) {
+    const s = ct.add('vsource', -18, -12 + i * 6);
+    s.props.wave = 'dc'; s.props.amp = k === 'SRCLR' ? 5 : 0; s.props.Rint = 50;
+    ct.connect(s.id, 0, u.id, SR[k]);
+    ct.connect(s.id, 1, gnd.id, 0);
+    src[k] = s;
+  });
+  const leds = [];
+  for (let i = 0; i < 8; i++) {
+    const r = ct.add('resistor', 14, -14 + i * 4); r.props.R = 330;
+    const l = ct.add('led', 26, -14 + i * 4);
+    ct.connect(u.id, i === 0 ? SR.Q0 : i - 1, r.id, 0);
+    ct.connect(r.id, 1, l.id, 0);
+    ct.connect(l.id, 1, gnd.id, 0);
+    leds.push(l);
+  }
+  ct.reset();
+  const go = n => { for (let i = 0; i < n; i++) ct.step(1e-4); };
+  go(40);
+  return { ct, u, src, leds, go };
+}
+
+test('Сдвиговый регистр 74HC595 принимает байт и защёлкивает его', function () {
+  const rig = shiftRig();
+  const byte = 0xB2;
+  for (let b = 7; b >= 0; b--) {                 // старшим битом вперёд
+    rig.src.SER.props.amp = (byte >> b) & 1 ? 5 : 0; rig.go(4);
+    rig.src.SRCLK.props.amp = 5; rig.go(4);
+    rig.src.SRCLK.props.amp = 0; rig.go(4);
+  }
+  check('байт вдвинут', rig.u.state.sr, 0xB2, 0);
+  check('до защёлки выходы не менялись', rig.u.state.out, 0, 0);
+  rig.src.RCLK.props.amp = 5; rig.go(4);
+  rig.src.RCLK.props.amp = 0; rig.go(30);
+  check('после защёлки байт на выходах', rig.u.state.out, 0xB2, 0);
+  check('светодиоды повторяют биты',
+    rig.leds.map(l => l.i > 3e-3 ? '1' : '0').join('') === '01001101' ? 1 : 0, 1, 0);
+  check('ток выхода (5−1,9)/(Rвых+R)', rig.leds[1].i, (5 - 1.9) / (40 + 330), 3e-4);
+
+  rig.src.OE.props.amp = 5; rig.go(40);          // снимаем разрешение
+  check('при /РАЗР=1 выходы отключены', rig.leds.filter(l => l.i > 3e-3).length, 0, 0);
+  check('содержимое защёлки не потерялось', rig.u.state.out, 0xB2, 0);
+  rig.src.OE.props.amp = 0; rig.go(40);
+  check('выходы вернулись', rig.leds.filter(l => l.i > 3e-3).length, 4, 0);
+
+  rig.src.SRCLR.props.amp = 0; rig.go(20);       // сброс сдвигового регистра
+  check('/СБР очистил сдвиговый регистр', rig.u.state.sr, 0, 0);
+  check('но не защёлку', rig.u.state.out, 0xB2, 0);
+});
+
+/** Стенд: драйвер MAX7219 с резистором задатчика и четырьмя разрядами. */
+function maxRig(rset) {
+  const MX = EC.MX;
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -40, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -40, 24);
+  const u = ct.add('max7219', 0, 0);
+  const disp = ct.add('seg7x4', 44, 0);
+  ct.connect(bat.id, 0, u.id, MX.VCC);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(u.id, MX.GND[0], gnd.id, 0);
+  if (rset) {
+    const r = ct.add('resistor', 12, -3); r.props.R = rset;
+    ct.connect(u.id, MX.VCC, r.id, 0);
+    ct.connect(r.id, 1, u.id, MX.ISET);
+  }
+  EC.SEG_ORDER.forEach(s => ct.connect(u.id, MX.SEG[s], disp.id, EC.S4_SEG[s]));
+  for (let d = 0; d < 4; d++) ct.connect(u.id, MX.DIG[d], disp.id, EC.S4_DIG[d]);
+  const src = {};
+  ['DIN', 'CLK', 'LOAD'].forEach(function (k, i) {
+    const s = ct.add('vsource', -26, -8 + i * 8);
+    s.props.wave = 'dc'; s.props.amp = 0; s.props.Rint = 50;
+    ct.connect(s.id, 0, u.id, MX[k]);
+    ct.connect(s.id, 1, gnd.id, 0);
+    src[k] = s;
+  });
+  ct.reset();
+  const go = n => { for (let i = 0; i < n; i++) ct.step(1e-4); };
+  go(30);
+  const send = word => {                          // шестнадцать бит, старшим вперёд
+    for (let b = 15; b >= 0; b--) {
+      src.DIN.props.amp = (word >> b) & 1 ? 5 : 0; go(2);
+      src.CLK.props.amp = 5; go(2);
+      src.CLK.props.amp = 0; go(2);
+    }
+    src.LOAD.props.amp = 5; go(3);
+    src.LOAD.props.amp = 0; go(3);
+  };
+  return { ct, u, disp, send, go };
+}
+
+test('MAX7219 принимает команды по трём проводам и зажигает цифры', function () {
+  const rig = maxRig(10000);
+  check('опорный ток (5−1,2)/10к', rig.u.iref, (5 - 1.2) / 10000, 1e-5);
+  check('ток сегмента в сто раз больше', rig.u.iseg, rig.u.iref * 100, 1e-4);
+  check('после включения микросхема в покое', rig.u.state.on ? 1 : 0, 0, 0);
+  rig.go(200);
+  check('в покое индикатор погашен', rig.disp.level.trim() === '' ? 1 : 0, 1, 0);
+
+  rig.send(0x0C01);                               // выход из покоя
+  rig.send(0x0B03);                               // четыре разряда
+  rig.send(0x09FF);                               // дешифратор на всех
+  rig.send(0x0A0F);                               // полная яркость
+  check('команды разобраны', rig.u.state.on && rig.u.state.scan === 3 &&
+    rig.u.state.decode === 0xFF && rig.u.state.intensity === 15 ? 1 : 0, 1, 0);
+
+  [1, 2, 3, 4].forEach((v, d) => rig.send(((d + 1) << 8) | v));
+  rig.go(700);
+  check('индикатор показывает 1234', rig.disp.level === '1234' ? 1 : 0, 1, 0);
+
+  // яркость мерцает в такт перебору разрядов, поэтому усредняем по кадрам
+  const glow = () => {
+    let sum = 0;
+    for (let i = 0; i < 200; i++) { rig.go(1); sum += rig.disp.state.lit[1][0]; }
+    return sum / 200;
+  };
+  const bright = glow();
+  rig.send(0x0A03);                               // приглушаем вчетверо
+  rig.go(900);
+  check('яркость упала пропорционально скважности', glow() / bright, 4 / 16, 0.03);
+
+  rig.send(0x0A0F);
+  rig.send(0x0900);                               // выключаем дешифратор
+  rig.send(0x017E);                               // прямая карта: всё кроме G и точки
+  rig.go(700);
+  check('без дешифратора биты ложатся на сегменты',
+    Number(rig.disp.state.lit[0].map(v => v > 0.25 ? 1 : 0).join('')), 11111100, 0);
+
+  const lit = rig.disp.i;
+  rig.send(0x0C00);                               // назад в покой
+  rig.go(2500);                                   // свечение гаснет не мгновенно
+  check('в покое индикатор снова погашен', rig.disp.level.trim() === '' ? 1 : 0, 1, 0);
+  check('ток индикатора сошёл на нет', rig.disp.i / lit < 1e-3 ? 1 : 0, 1, 0);
+});
+
+test('Без резистора задатчика MAX7219 не даёт тока', function () {
+  const rig = maxRig(0);
+  rig.send(0x0C01); rig.send(0x0B03); rig.send(0x09FF); rig.send(0x0A0F);
+  rig.send(0x0108);
+  rig.go(500);
+  check('опорного тока нет', rig.u.iref, 0, 1e-9);
+  check('индикатор не горит', rig.disp.level.trim() === '' ? 1 : 0, 1, 0);
+  check('микросхема предупреждает', rig.u.warn ? 1 : 0, 1, 0);
+});
+
+test('Пример «Восемь огней по трём проводам»', function () {
+  const ct = EC.examples.find(e => e.id === 'shift595').make();
+  const leds = ct.components.filter(c => c.type === 'led');
+  const sr = ct.components.find(c => c.type === 'sr595');
+  check('программа собрана',
+    ct.components.find(c => c.type === 'cpu8').state.asm.ok ? 1 : 0, 1, 0);
+  const seen = new Set();
+  for (let i = 0; i < 60000; i++) {
+    ct.step(1 / 8000);
+    if (i % 40 === 0) seen.add(leds.map(l => l.i > 3e-3 ? '1' : '0').join(''));
+  }
+  check('огонёк побывал на всех восьми выходах',
+    [1, 2, 4, 8, 16, 32, 64, 128].filter(function (m) {
+      return seen.has(Array.from({ length: 8 }, (_, k) => (m >> k) & 1).join(''));
+    }).length, 8, 0);
+  check('в регистре ровно один бит',
+    [0, 1, 2, 4, 8, 16, 32, 64, 128].indexOf(sr.state.out) >= 0 ? 1 : 0, 1, 0);
+});
+
+test('Пример «Счётчик на цифровом индикаторе»', function () {
+  const ct = EC.examples.find(e => e.id === 'max7219').make();
+  const disp = ct.components.find(c => c.type === 'seg7x4');
+  const drv = ct.components.find(c => c.type === 'max7219');
+  const dt = 1 / 12000;
+  const seen = [];
+  for (let i = 0; i < 90000; i++) {
+    ct.step(dt);
+    if (i % 3000 === 0) {
+      const s = disp.level;
+      if (!seen.length || seen[seen.length - 1] !== s) seen.push(s);
+    }
+  }
+  check('драйвер выведен из покоя', drv.state.on ? 1 : 0, 1, 0);
+  check('дешифратор включён', drv.state.decode, 0xFF, 0);
+  check('показаны четыре разряда', drv.state.scan, 3, 0);
+  check('счёт дошёл до 0000', seen.indexOf('0000') >= 0 ? 1 : 0, 1, 0);
+  check('счёт продолжился', seen.indexOf('0002') > seen.indexOf('0000') ? 1 : 0, 1, 0);
 });
 
 console.log('\n' + '─'.repeat(50));

@@ -1476,6 +1476,11 @@
         // за один шаг расчёта процессор делает не больше одного обмена
         dt = Math.min(dt, 1 / (Math.max(c.props.freq, 1) * 4));
       }
+      if (c.type === 'cpu8' && c.props.clkSrc === 'internal') {
+        // на шаг должно приходиться не больше одной команды, иначе схема
+        // не увидит короткие импульсы, которыми процессор общается с ней
+        dt = Math.min(dt, 1 / (Math.max(c.props.freq, 1) * 2));
+      }
       if (c.type === 'inductor') Ls.push(Math.max(c.props.L, 1e-12));
       if (c.type === 'capacitor' || c.type === 'capacitor_pol') Cs.push(Math.max(c.props.C, 1e-15));
     }

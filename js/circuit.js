@@ -32,7 +32,8 @@
     voltmeter: 'PV', ammeter: 'PA', wattmeter: 'PW', probe: 'X', ground: '', junction: '',
     thermistor: 'RK', photoresistor: 'RL', transformer: 'TV', schottky: 'VD', bridge: 'VD',
     regulator: 'DA', motor: 'M', buzzer: 'HA',
-    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD', cpu8: 'DD', cpu_bus: 'DD', memory: 'DD'
+    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD', cpu8: 'DD', cpu_bus: 'DD', memory: 'DD',
+    seg7: 'HG', seg7x4: 'HG', sr595: 'DD', max7219: 'DD'
   };
 
   /* ------------------------------------------------------------------ */
@@ -74,7 +75,9 @@
   /** Габаритный прямоугольник в клетках (для попадания курсором). */
   Component.prototype.bounds = function () {
     var def = this.def();
-    var minX = -1, maxX = 1, minY = -1, maxY = 1;
+    var box = def.box;
+    var minX = box ? -box.w / 2 : -1, maxX = box ? box.w / 2 : 1;
+    var minY = box ? -box.h / 2 : -1, maxY = box ? box.h / 2 : 1;
     for (var i = 0; i < def.pins.length; i++) {
       var p = this.pinPos(i);
       minX = Math.min(minX, p.x - this.x); maxX = Math.max(maxX, p.x - this.x);
@@ -93,6 +96,12 @@
    */
   Component.prototype.body = function () {
     var def = this.def();
+    if (def.box) {                               // габарит корпуса задан явно
+      return {
+        x: this.x - def.box.w / 2, y: this.y - def.box.h / 2,
+        w: def.box.w, h: def.box.h
+      };
+    }
     var minX = 0, maxX = 0, minY = 0, maxY = 0;
     for (var i = 0; i < def.pins.length; i++) {
       var p = this.pinPos(i);
@@ -320,55 +329,87 @@
   };
 
   /**
-   * Подбирает маршрут целиком: ось и линию коврика. Если выводы смотрят
+   * Подбирает маршрут целиком: ось и линии коврика. Если выводы смотрят
    * в одну сторону, эта сторона и задаёт ось; иначе берётся направление
    * дальнего вывода, чтобы провод подходил к нему как положено.
-   * Когда предпочтительная ось не даёт развести провод, пробуется вторая.
+   * Когда простой маршрут с одним изломом развести не удаётся — например,
+   * колонку выводов микросхемы надо свести с рядом выводов индикатора, —
+   * пробуется маршрут с двумя изломами: тогда у каждого провода свой
+   * подход и к началу, и к концу.
    */
   Circuit.prototype.chooseRoute = function (wire) {
     var ca = this.byId(wire.a.c), cb = this.byId(wire.b.c);
     if (!ca || !cb) return;
     var da = this.pinAxis(ca, wire.a.p), db = this.pinAxis(cb, wire.b.p);
     var preferred = da === db ? da : db;
-    var other = preferred === 'h' ? 'v' : 'h';
-    var best = null;
-    [preferred, other].forEach(function (axis, k) {
+    var axes = [preferred, preferred === 'h' ? 'v' : 'h'];
+    var best = null, self = this;
+
+    function score(axis, k, extra) {
+      var path = self.wirePath(wire);
+      return (path ? self.routeCost(wire, path) : Infinity) + k * 0.1 + (extra || 0);
+    }
+    axes.forEach(function (axis, k) {
       wire.axis = axis;
-      var mid = this.chooseMid(wire);
-      wire.mid = mid;
-      var path = this.wirePath(wire);
-      var score = (path ? this.routeCost(wire, path) : Infinity) + k * 0.1;
-      if (!best || score < best.score) best = { axis: axis, mid: mid, score: score };
-    }, this);
+      wire.mid2 = undefined;
+      wire.mid = self.chooseMid(wire);
+      var sc = score(axis, k);
+      if (!best || sc < best.score) best = { axis: axis, mid: wire.mid, mid2: undefined, score: sc };
+    });
+
+    if (best.score > 0.01) {
+      axes.forEach(function (axis, k) {
+        wire.axis = axis;
+        wire.mid2 = undefined;
+        wire.mid = self.chooseMid(wire);
+        wire.mid2 = self.bestLine(wire, 'mid2');
+        wire.mid = self.bestLine(wire, 'mid');
+        wire.mid2 = self.bestLine(wire, 'mid2');
+        // лишний излом сам по себе чуть хуже: берём его только ради дела
+        var sc = score(axis, k, 0.3);
+        if (sc < best.score) best = { axis: axis, mid: wire.mid, mid2: wire.mid2, score: sc };
+      });
+    }
     wire.axis = best.axis;
     wire.mid = best.mid;
+    wire.mid2 = best.mid2;
   };
 
-  /** Подбирает линию коврика, на которой маршрут ни на что не ложится. */
-  Circuit.prototype.chooseMid = function (wire) {
+  /** Середина отрезка между концами провода вдоль нужной оси. */
+  Circuit.prototype.lineBase = function (wire, prop) {
     var e = this.wireEnds(wire);
     if (!e) return 0;
     var horiz = wire.axis !== 'v';
-    var base = Math.round(horiz ? (e.a.x + e.b.x) / 2 : (e.a.y + e.b.y) / 2);
-    var saved = wire.mid, best = base, bestScore = Infinity;
-    for (var d = 0; d <= 24 && bestScore > 0.01; d++) {
+    if (prop === 'mid') return Math.round(horiz ? (e.a.x + e.b.x) / 2 : (e.a.y + e.b.y) / 2);
+    return Math.round(horiz ? (e.a.y + e.b.y) / 2 : (e.a.x + e.b.x) / 2);
+  };
+
+  /** Ищет линию коврика, на которой маршрут ни на что не ложится. */
+  Circuit.prototype.bestLine = function (wire, prop) {
+    var base = this.lineBase(wire, prop);
+    var saved = wire[prop], best = base, bestScore = Infinity;
+    for (var d = 0; d <= 40 && bestScore > 0.01; d++) {
       for (var k = 0; k < (d ? 2 : 1); k++) {
         var m = base + (k ? -d : d);
-        wire.mid = m;
+        wire[prop] = m;
         var path = this.wirePath(wire);
         // небольшая надбавка за удаление от середины: при прочих равных ближе
-        var score = path ? this.routeCost(wire, path) + d * 0.02 : Infinity;
-        if (score < bestScore) { bestScore = score; best = m; }
+        var sc = path ? this.routeCost(wire, path) + d * 0.02 : Infinity;
+        if (sc < bestScore) { bestScore = sc; best = m; }
         if (bestScore <= 0.01) break;
       }
     }
-    wire.mid = saved;
+    wire[prop] = saved;
     return best;
   };
 
+  Circuit.prototype.chooseMid = function (wire) { return this.bestLine(wire, 'mid'); };
+
   /**
-   * Ломаная провода: два поворота под прямым углом, средний участок
-   * лежит на выбранной линии коврика и может переставляться на соседнюю.
+   * Ломаная провода. Обычно это два поворота под прямым углом, средний
+   * участок лежит на выбранной линии коврика и переставляется на соседнюю.
+   * Если задана вторая линия, изломов три и провод подходит к концу
+   * поперёк — так расходятся пучки, идущие из колонки выводов в ряд.
    */
   Circuit.prototype.wirePath = function (wire) {
     var e = this.wireEnds(wire);
@@ -377,9 +418,17 @@
     if (Math.abs(pa.x - pb.x) < 1e-6 || Math.abs(pa.y - pb.y) < 1e-6) return [pa, pb];
     if (wire.mid === undefined) wire.mid = this.chooseMid(wire);
     if (wire.axis === 'v') {
-      return [pa, { x: pa.x, y: wire.mid }, { x: pb.x, y: wire.mid }, pb];
+      if (wire.mid2 === undefined) {
+        return [pa, { x: pa.x, y: wire.mid }, { x: pb.x, y: wire.mid }, pb];
+      }
+      return [pa, { x: pa.x, y: wire.mid }, { x: wire.mid2, y: wire.mid },
+        { x: wire.mid2, y: pb.y }, pb];
     }
-    return [pa, { x: wire.mid, y: pa.y }, { x: wire.mid, y: pb.y }, pb];
+    if (wire.mid2 === undefined) {
+      return [pa, { x: wire.mid, y: pa.y }, { x: wire.mid, y: pb.y }, pb];
+    }
+    return [pa, { x: wire.mid, y: pa.y }, { x: wire.mid, y: wire.mid2 },
+      { x: pb.x, y: wire.mid2 }, pb];
   };
 
   /**
@@ -389,7 +438,10 @@
    */
   Circuit.prototype.reroute = function (passes) {
     var i, prev = Infinity;
-    for (i = 0; i < this.wires.length; i++) this.wires[i].mid = undefined;
+    for (i = 0; i < this.wires.length; i++) {
+      this.wires[i].mid = undefined;
+      this.wires[i].mid2 = undefined;
+    }
     for (var pass = 0; pass < (passes || 5); pass++) {
       for (i = 0; i < this.wires.length; i++) this.chooseRoute(this.wires[i]);
       var total = 0;
@@ -685,7 +737,10 @@
         return { id: c.id, type: c.type, x: c.x, y: c.y, rot: c.rot, name: c.name, props: c.props };
       }),
       wires: this.wires.map(function (w) {
-        return { id: w.id, a: w.a, b: w.b, color: w.color, axis: w.axis, mid: w.mid };
+        return {
+          id: w.id, a: w.a, b: w.b, color: w.color,
+          axis: w.axis, mid: w.mid, mid2: w.mid2
+        };
       })
     };
   };
@@ -707,7 +762,8 @@
         id: w.id || U.uid('w'), a: w.a, b: w.b, current: 0,
         color: w.color === undefined ? i % WIRE_COLORS.length : w.color,
         axis: w.axis || 'h',
-        mid: w.mid
+        mid: w.mid,
+        mid2: w.mid2
       });
     });
     ct.dirty = true;
