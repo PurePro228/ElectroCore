@@ -2041,6 +2041,7 @@
       },
       draw: function (g, c) {
         var w = GRID * 2.1, h = GRID * 1.9;
+        var inv = key === 'not_gate' || key === 'nand_gate' || key === 'nor_gate';
         if (inputs === 1) {
           lead(g, -2 * GRID, 0, -w / 2, 0);
         } else {
@@ -2053,6 +2054,12 @@
         g.strokeStyle = c.state && c.state.out ? 'rgba(125,255,208,.8)' : 'rgba(170,190,210,.7)';
         g.lineWidth = 1.3;
         roundRect(g, -w / 2, -h / 2, w, h, 3); g.stroke();
+        if (inv) {                               // кружок инверсии на выходе
+          g.fillStyle = EC.skin === 'real' ? 'rgba(20,26,34,.95)' : 'rgba(18,24,32,.95)';
+          g.beginPath(); g.arc(w / 2 + 3, 0, 3, 0, 7); g.fill();
+          g.strokeStyle = 'rgba(190,210,230,.8)'; g.lineWidth = 1.1;
+          g.beginPath(); g.arc(w / 2 + 3, 0, 3, 0, 7); g.stroke();
+        }
         gfx.chipPins(g, c, gatePins(inputs), w, 5.4);
         g.save();
         g.rotate(-(c.rot || 0) * Math.PI / 2);
@@ -2075,6 +2082,9 @@
   define(gate('not_gate', 'Элемент НЕ', 1, function (v) { return !v[0]; }, '1'));
   define(gate('and_gate', 'Элемент И', 2, function (v) { return v[0] && v[1]; }, '&'));
   define(gate('or_gate', 'Элемент ИЛИ', 2, function (v) { return v[0] || v[1]; }, '≥1'));
+  define(gate('nand_gate', 'Элемент И-НЕ', 2, function (v) { return !(v[0] && v[1]); }, '&'));
+  define(gate('nor_gate', 'Элемент ИЛИ-НЕ', 2, function (v) { return !(v[0] || v[1]); }, '≥1'));
+  define(gate('xor_gate', 'Исключающее ИЛИ', 2, function (v) { return v[0] !== v[1]; }, '=1'));
 
   /* ================================================================== */
   /*  Таймер NE555                                                       */

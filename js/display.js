@@ -633,5 +633,112 @@
   EC.S1_COM = S1_COM;
   EC.MX_BITMAP = MX_BITMAP;
 
+
+  /* ------------------------------------------------------------------ */
+  /*  Светодиодная матрица 8 × 8                                         */
+  /* ------------------------------------------------------------------ */
+
+  /* Снизу выводы рядов (катоды), сверху — столбцов (аноды). Такая матрица
+     рассчитана ровно на MAX7219: у него восемь разрядов и восемь сегментов. */
+  var M8_ROW = [], M8_COL = [];
+  (function () {
+    for (var i = 0; i < 8; i++) { M8_ROW.push(i); M8_COL.push(8 + i); }
+  })();
+
+  function matrixPins() {
+    var pins = [], i;
+    for (i = 0; i < 8; i++) pins.push({ x: -7 + i * 2, y: 13, name: 'Р' + (i + 1) });
+    for (i = 0; i < 8; i++) pins.push({ x: -7 + i * 2, y: -13, name: 'С' + (i + 1) });
+    return pins;
+  }
+
+  define({
+    key: 'matrix8', name: 'Матрица 8×8', cat: 'display',
+    tip: 'Шестьдесят четыре светодиода: аноды собраны по столбцам, катоды по рядам. Зажигать их приходится по одному ряду за раз — как раз то, что умеет MAX7219, у которого восемь разрядов и восемь сегментов.',
+    pins: matrixPins(),
+    box: { w: 26, h: 26 },
+    props: [
+      { key: 'color', label: 'Цвет', type: 'select', options: COLOR_OPTIONS, def: 'red' },
+      { key: 'Vf', label: 'Прямое падение', unit: 'В', def: 1.9, min: 0.3 },
+      { key: 'If', label: 'Номин. ток сегмента', unit: 'А', def: 0.02, min: 1e-5 }
+    ],
+    nonlinear: true,
+    init: function (c) {
+      c.state = { lit: [], iavg: 0 };
+      for (var r = 0; r < 8; r++) {
+        var row = [];
+        for (var k = 0; k < 8; k++) row.push(0);
+        c.state.lit.push(row);
+      }
+    },
+    stamp: function (c, ctx) {
+      var n = c.n;
+      for (var r = 0; r < 8; r++) {
+        for (var k = 0; k < 8; k++) {
+          J.stamp(ctx, c, n[M8_COL[k]], n[M8_ROW[r]], segOpts(c), '_m' + r + '_' + k);
+        }
+      }
+    },
+    post: function (c, ctx) {
+      var n = c.n, st = c.state, total = 0;
+      for (var r = 0; r < 8; r++) {
+        for (var k = 0; k < 8; k++) {
+          var vd = ctx.nv(n[M8_COL[k]]) - ctx.nv(n[M8_ROW[r]]);
+          var i = Math.max(J.eval(ctx, vd, segOpts(c)).i, 0);
+          total += i;
+          st.lit[r][k] = smooth(st.lit[r][k],
+            i / (Math.max(c.props.If, 1e-6) * GLOW_FULL), ctx.dt);
+        }
+      }
+      st.iavg = smooth(st.iavg, total, ctx.dt);
+      c.i = st.iavg;
+      c.v = 0;
+      c.level = matrixText(st.lit);
+      c.pinI = null;
+    },
+    draw: function (g, c) {
+      var w = 26 * GRID, h = 26 * GRID;
+      displayBody(g, c, w, h);
+      var step = w * 0.108, r0 = step * 0.33;
+      var rgb = glowRGB(c), r, k, x, y, v;
+      // погасшие точки рисуем одним путём — их всегда большинство
+      g.fillStyle = 'rgba(30,34,40,.9)';
+      g.beginPath();
+      for (r = 0; r < 8; r++) {
+        for (k = 0; k < 8; k++) {
+          v = (c.state && c.state.lit[r][k]) || 0;
+          if (v > 0.02) continue;
+          x = (k - 3.5) * step; y = (r - 3.5) * step;
+          g.moveTo(x + r0, y);
+          g.arc(x, y, r0, 0, 7);
+        }
+      }
+      g.fill();
+      for (r = 0; r < 8; r++) {
+        for (k = 0; k < 8; k++) {
+          v = U.clamp((c.state && c.state.lit[r][k]) || 0, 0, 1.3);
+          if (v <= 0.02) continue;
+          x = (k - 3.5) * step; y = (r - 3.5) * step;
+          g.fillStyle = 'rgba(' + rgb + ',' + (0.35 + 0.6 * Math.min(v, 1)) + ')';
+          g.shadowColor = 'rgba(' + rgb + ',' + (0.6 * Math.min(v, 1)) + ')';
+          g.shadowBlur = step * 0.7;
+          g.beginPath(); g.arc(x, y, r0, 0, 7); g.fill();
+          g.shadowBlur = 0;
+        }
+      }
+      label(g, c, [c.name || ''], h / 2 + GRID * 0.9);
+    }
+  });
+
+  /** Сколько точек горит — короткая сводка для подписи и проверок. */
+  function matrixText(lit) {
+    var n = 0;
+    for (var r = 0; r < 8; r++) for (var k = 0; k < 8; k++) if (lit[r][k] > 0.25) n++;
+    return n + '/64';
+  }
+  EC.matrixText = matrixText;
+  EC.M8_ROW = M8_ROW;
+  EC.M8_COL = M8_COL;
+
   EC.sortCategories();
 })(window);

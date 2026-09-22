@@ -4,7 +4,7 @@
 'use strict';
 const path = require('path');
 global.window = {};
-['util', 'i18n', 'solver', 'cpu', 'components', 'display', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
+['util', 'i18n', 'solver', 'cpu', 'components', 'display', 'chips', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
   require(path.join(__dirname, '..', 'js', m + '.js'));
 });
 const EC = global.window.EC;
@@ -1599,6 +1599,206 @@ test('Пример «Счётчик на цифровом индикаторе»
 /* ------------------------------------------------------------------ */
 /*  Два языка интерфейса                                               */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/*  Новые микросхемы автоматики                                        */
+/* ------------------------------------------------------------------ */
+
+/** Подаёт на два входа логического элемента уровни и читает выход. */
+function gateOut(type, a, b) {
+  const ct = new EC.Circuit();
+  const g = ct.add(type, 0, 0);
+  const gnd = ct.add('ground', -20, 20);
+  const sa = ct.add('vsource', -20, -4);
+  sa.props.wave = 'dc'; sa.props.amp = a ? 5 : 0; sa.props.Rint = 50;
+  const sb = ct.add('vsource', -20, 4);
+  sb.props.wave = 'dc'; sb.props.amp = b ? 5 : 0; sb.props.Rint = 50;
+  ct.connect(sa.id, 0, g.id, 0); ct.connect(sa.id, 1, gnd.id, 0);
+  ct.connect(sb.id, 0, g.id, 1); ct.connect(sb.id, 1, gnd.id, 0);
+  const v = ct.add('voltmeter', 14, 0);
+  ct.connect(g.id, 2, v.id, 0); ct.connect(v.id, 1, gnd.id, 0);
+  ct.reset();
+  run(ct, 0.03, 1e-4);
+  return v.reading > 2.5 ? 1 : 0;
+}
+
+test('Таблицы истинности новых логических элементов', function () {
+  const rows = [[0, 0], [0, 1], [1, 0], [1, 1]];
+  const table = type => rows.map(r => gateOut(type, r[0], r[1])).join('');
+  check('И-НЕ даёт 1110', Number(table('nand_gate')), 1110, 0);
+  check('ИЛИ-НЕ даёт 1000', Number(table('nor_gate')), 1000, 0);
+  check('исключающее ИЛИ даёт 0110', Number(table('xor_gate')), 110, 0);
+});
+
+test('Кварцевый генератор выдаёт заданную частоту', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -20, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -20, 14);
+  const g = ct.add('oscillator', 0, 0); g.props.freq = 500;
+  ct.connect(bat.id, 0, g.id, 3); ct.connect(g.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  const r = ct.add('resistor', 14, 0); r.props.R = 1000;
+  ct.connect(g.id, 2, r.id, 0); ct.connect(r.id, 1, gnd.id, 0);
+  ct.reset();
+  let edges = 0, prev = false, t = 0;
+  for (let i = 0; i < 40000; i++) {
+    ct.step(1e-5); t += 1e-5;
+    const on = ct.x[g.n[2]] > 2.5;
+    if (on && !prev) edges++;
+    prev = on;
+  }
+  check('частота совпадает с заданной', edges / t, 500, 3);
+  check('амплитуда доходит до питания', ct.x[g.n[2]] > 4.5 || ct.x[g.n[2]] < 0.5 ? 1 : 0, 1, 0);
+});
+
+test('D-триггер делит частоту пополам', function () {
+  const ct = new EC.Circuit();
+  const gnd = ct.add('ground', -20, 20);
+  const clk = ct.add('vsource', -20, 0);
+  clk.props.wave = 'square'; clk.props.amp = 2.5; clk.props.offset = 2.5;
+  clk.props.freq = 200; clk.props.Rint = 50;
+  const d = ct.add('dff', 0, 0);
+  ct.connect(clk.id, 0, d.id, 1); ct.connect(clk.id, 1, gnd.id, 0);
+  ct.connect(d.id, 4, d.id, 0);                 // /Q на вход D
+  ct.reset();
+  let edges = 0, prev = false, t = 0;
+  for (let i = 0; i < 100000; i++) {
+    ct.step(1e-5); t += 1e-5;
+    const q = d.state.q;
+    if (q && !prev) edges++;
+    prev = q;
+  }
+  check('на выходе половина тактовой частоты', edges / t, 100, 2);
+  check('прямой и обратный выходы противоположны',
+    (ct.x[d.n[3]] > 2.5) !== (ct.x[d.n[4]] > 2.5) ? 1 : 0, 1, 0);
+});
+
+test('Счётчик CD4017 переводит единицу с выхода на выход', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -30, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -30, 20);
+  const osc = ct.add('oscillator', -14, 0); osc.props.freq = 200;
+  const cd = ct.add('cd4017', 6, 0);
+  ct.connect(bat.id, 0, osc.id, 3); ct.connect(osc.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 0, cd.id, 15); ct.connect(cd.id, 7, gnd.id, 0);
+  ct.connect(osc.id, 2, cd.id, 13);
+  const Q = [2, 1, 3, 6, 9, 0, 4, 5, 8, 10];
+  const leds = [];
+  for (let i = 0; i < 10; i++) {
+    const r = ct.add('resistor', 20, -18 + i * 4); r.props.R = 330;
+    const l = ct.add('led', 32, -18 + i * 4);
+    ct.connect(cd.id, Q[i], r.id, 0);
+    ct.connect(r.id, 1, l.id, 0);
+    ct.connect(l.id, 1, gnd.id, 0);
+    leds.push(l);
+  }
+  ct.reset();
+  const seen = new Set();
+  let carry = 0, prevCarry = false;
+  for (let i = 0; i < 60000; i++) {
+    ct.step(2e-5);
+    if (i % 20 === 0) seen.add(leds.map(l => l.i > 3e-3 ? '1' : '0').join(''));
+    const co = ct.x[cd.n[11]] > 2.5;
+    if (co && !prevCarry) carry++;
+    prevCarry = co;
+  }
+  const single = [...seen].filter(s => s.split('1').length === 2);
+  check('побывали все десять выходов', single.length, 10, 0);
+  check('горит всегда только один', seen.size <= 11 ? 1 : 0, 1, 0);
+  check('ток светодиода (5−1,9)/(Rвых+R)', leds.find(l => l.i > 3e-3).i,
+    (5 - 1.9) / (40 + 330), 5e-4);
+  // вывод переноса делит частоту такта на десять
+  check('перенос срабатывает вдесятеро реже такта', carry, 200 * 1.2 / 10, 3);
+});
+
+test('Сборка ULN2003 тянет нагрузку к общему проводу', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -30, 0); bat.props.V = 12; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -30, 20);
+  const u = ct.add('uln2003', 0, 0);
+  const lamp = ct.add('lamp', 20, 0); lamp.props.Vn = 12; lamp.props.Pn = 3;
+  const src = ct.add('vsource', -16, 10);
+  src.props.wave = 'dc'; src.props.amp = 0; src.props.Rint = 50;
+  ct.connect(bat.id, 1, gnd.id, 0); ct.connect(u.id, 7, gnd.id, 0);
+  ct.connect(bat.id, 0, lamp.id, 0); ct.connect(lamp.id, 1, u.id, 15);
+  ct.connect(bat.id, 0, u.id, 8);
+  ct.connect(src.id, 0, u.id, 0); ct.connect(src.id, 1, gnd.id, 0);
+  ct.reset();
+  run(ct, 0.8, 2e-4);
+  check('вход отпущен — ключ закрыт', lamp.i < 1e-4 ? 1 : 0, 1, 0);
+  src.props.amp = 5;
+  run(ct, 1.2, 2e-4);
+  check('вход поднят — лампа горит на полный ток', lamp.i, 3 / 12, 0.02);
+  check('падение на открытом ключе меньше вольта',
+    (ct.x[u.n[15]] - 0) < 1 ? 1 : 0, 1, 0);
+  check('занят один ключ из семи', u.level === '1/7' ? 1 : 0, 1, 0);
+});
+
+test('Оптрон передаёт ток светом', function () {
+  const ct = new EC.Circuit();
+  const gnd = ct.add('ground', -30, 24);
+  const b1 = ct.add('battery', -30, 0); b1.props.V = 5; b1.props.Rint = 0.1;
+  const b2 = ct.add('battery', 20, 0); b2.props.V = 12; b2.props.Rint = 0.1;
+  const o = ct.add('optocoupler', -6, 0);
+  const rin = ct.add('resistor', -18, -4); rin.props.R = 330;
+  const rout = ct.add('resistor', 8, -4); rout.props.R = 10000;
+  ct.connect(b1.id, 0, rin.id, 0); ct.connect(rin.id, 1, o.id, 0);
+  ct.connect(o.id, 1, gnd.id, 0); ct.connect(b1.id, 1, gnd.id, 0);
+  ct.connect(b2.id, 0, rout.id, 0); ct.connect(rout.id, 1, o.id, 3);
+  ct.connect(o.id, 2, gnd.id, 0); ct.connect(b2.id, 1, gnd.id, 0);
+  ct.reset();
+  run(ct, 0.4, 2e-4);
+  check('ток светодиода (5−1,2)/330', o._iled, (5 - 1.2) / 330, 3e-4);
+  check('транзистор насыщен — Uкэ мало', o.v < 0.5 ? 1 : 0, 1, 0);
+  check('ток коллектора задан нагрузкой', o.i, (12 - o.v) / 10000, 5e-5);
+
+  // при малой передаче транзистор выходит из насыщения и ток задаёт он сам
+  o.props.ctr = 0.05;
+  run(ct, 0.4, 2e-4);
+  check('ток стал равен доле тока светодиода', o.i, o._iled * 0.05, 6e-5);
+  check('и напряжение на транзисторе выросло', o.v > 4 ? 1 : 0, 1, 0);
+
+  // без тока в светодиоде транзистор закрыт
+  b1.props.V = 0;
+  run(ct, 0.4, 2e-4);
+  check('свет погас — транзистор закрыт', o.i < 1e-6 ? 1 : 0, 1, 0);
+});
+
+test('Пример «Бегущие огни без процессора»', function () {
+  const ct = EC.examples.find(e => e.id === 'chaser4017').make();
+  const leds = ct.components.filter(c => c.type === 'led');
+  const seen = new Set();
+  for (let i = 0; i < 300000; i++) {
+    ct.step(2e-5);
+    if (i % 50 === 0) seen.add(leds.map(l => l.i > 3e-3 ? '1' : '0').join(''));
+  }
+  const single = [...seen].filter(s => s.split('1').length === 2);
+  check('огонёк обошёл все десять светодиодов', single.length, 10, 0);
+  check('лишних сочетаний не было', seen.size, 11, 0);
+});
+
+test('Пример «Точка бежит по матрице 8×8»', function () {
+  const ct = EC.examples.find(e => e.id === 'matrix').make();
+  const m = ct.components.find(c => c.type === 'matrix8');
+  const drv = ct.components.find(c => c.type === 'max7219');
+  const dt = 1 / 6000;
+  const spots = [];
+  for (let i = 0; i < 150000; i++) {
+    ct.step(dt);
+    if (i % 12000 === 0 && i > 12000) {
+      for (let r = 0; r < 8; r++) {
+        for (let k = 0; k < 8; k++) if (m.state.lit[r][k] > 0.25) spots.push(r * 8 + k);
+      }
+    }
+  }
+  check('драйвер выведен из покоя', drv.state.on ? 1 : 0, 1, 0);
+  check('показаны все восемь рядов', drv.state.scan, 7, 0);
+  check('дешифратор выключен — биты идут на столбцы', drv.state.decode, 0, 0);
+  check('горит ровно одна точка', m.level === '1/64' ? 1 : 0, 1, 0);
+  check('точка двигалась', spots.length > 3 && spots[0] !== spots[spots.length - 1] ? 1 : 0, 1, 0);
+  check('точка шла по порядку', spots.every((v, i) => i === 0 || v > spots[i - 1]) ? 1 : 0, 1, 0);
+});
 
 test('Английский перевод покрывает всё, что видит человек', function () {
   const d = EC.i18n.en;

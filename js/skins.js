@@ -1156,7 +1156,7 @@
   };
 
   /** Логическая микросхема в корпусе DIP. */
-  function logicChip(g, c, symbol, inputs) {
+  function logicChip(g, c, symbol, inputs, inverting) {
     var w = GRID * 2.2, h = GRID * 2.2;
     if (inputs === 1) lead(g, -2 * GRID, 0, -w / 2, 0, 2.4);
     else {
@@ -1174,6 +1174,12 @@
     g.beginPath(); g.arc(-w / 2, 0, h * 0.12, -Math.PI / 2, Math.PI / 2); g.fill();
     g.fillStyle = 'rgba(255,255,255,.07)';
     roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.18, 1.5); g.fill();
+    if (inverting) {                           // кружок инверсии на выходе
+      g.fillStyle = 'rgba(14,18,24,.95)';
+      g.beginPath(); g.arc(w / 2 + 3, 0, 3, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(200,215,230,.8)'; g.lineWidth = 1.1;
+      g.beginPath(); g.arc(w / 2 + 3, 0, 3, 0, 7); g.stroke();
+    }
     gfx.chipPins(g, c, inputs === 1
       ? [{ i: 0, t: 'A' }, { i: 1, t: 'Y' }]
       : [{ i: 0, t: 'A' }, { i: 1, t: 'B' }, { i: 2, t: 'Y' }], w, 5.4);
@@ -1185,9 +1191,12 @@
     label(g, c, [(c.name || '') + '  ' + EC.t(c.level || '')], GRID * 1.9);
   }
 
-  real.not_gate = function (g, c) { logicChip(g, c, '1', 1); };
+  real.not_gate = function (g, c) { logicChip(g, c, '1', 1, true); };
   real.and_gate = function (g, c) { logicChip(g, c, '&', 2); };
   real.or_gate = function (g, c) { logicChip(g, c, '≥1', 2); };
+  real.nand_gate = function (g, c) { logicChip(g, c, '&', 2, true); };
+  real.nor_gate = function (g, c) { logicChip(g, c, '≥1', 2, true); };
+  real.xor_gate = function (g, c) { logicChip(g, c, '=1', 2); };
 
   real.cpu8 = function (g, c) {
     // процессор в корпусе DIP-8
@@ -1325,5 +1334,14 @@
   real.max7219 = function (g, c) {
     wideDip(g, c, function () { return EC.maxFace(c); }, EC.MX_PINS,
       c.powered && c.state && c.state.on);
+  };
+
+  real.cd4017 = function (g, c) {
+    wideDip(g, c, function () { return EC.cdFace(c); }, EC.CD_PINS, c.powered);
+  };
+
+  real.uln2003 = function (g, c) {
+    wideDip(g, c, function () { return EC.ulnFace(c); }, EC.ULN_PINS,
+      c.state && c.state.on.indexOf(true) >= 0);
   };
 })(window);

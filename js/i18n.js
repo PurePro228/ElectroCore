@@ -1185,4 +1185,155 @@
     'подключают параллельно участку,': 'goes across the part under test,',
     'Язык: русский': 'Language: Russian'
   });
+
+  /* ------------------- логика, ключи и индикация --------------------- */
+
+  add({
+    'Элемент И-НЕ': 'NAND gate',
+    'Элемент ИЛИ-НЕ': 'NOR gate',
+    'Исключающее ИЛИ': 'XOR gate',
+    'D-триггер': 'D flip-flop',
+    'Один бит памяти. По фронту на входе C выход Q принимает то, что было на входе D, и держит это до следующего фронта. Низкий уровень на /СБР обнуляет.':
+      'One bit of memory. On an edge at input C, output Q takes whatever was on input D and holds it until the next edge. A low level on /RST clears it.',
+    'Счётчик CD4017': 'CD4017 counter',
+    'Десять выходов, и высокий уровень по очереди переходит с одного на другой по каждому фронту такта. Классика бегущих огней: тактируют его от таймера 555. Вывод ÷10 делит частоту на десять, СБР возвращает счёт в начало.':
+      'Ten outputs, and the high level steps from one to the next on every clock edge. The classic running-light chip: clock it from a 555. The ÷10 pin divides the frequency by ten and RST sends the count back to the start.',
+    'Оптрон': 'Optocoupler',
+    'Светодиод и фототранзистор в одном корпусе, между ними только свет. Ток через светодиод открывает транзистор, а электрически цепи не связаны — так развязывают слаботочную часть от силовой.':
+      'An LED and a phototransistor in one package with nothing but light between them. Current through the LED turns the transistor on while the two circuits stay electrically apart — that is how a low-power side is isolated from a power one.',
+    'Передача тока': 'Current transfer ratio',
+    'Ключи ULN2003': 'ULN2003 drivers',
+    'Семь составных транзисторов в одном корпусе: логическая единица на входе притягивает выход к общему проводу и держит до полуампера. Так от процессора питают реле, обмотки шагового двигателя и лампы. Вывод 9 соединяют с плюсом нагрузки — внутри к нему идут защитные диоды.':
+      'Seven Darlington pairs in one package: a logic one on an input pulls the output down to ground and holds up to half an amp. That is how a processor runs relays, stepper windings and lamps. Pin 9 goes to the plus of the load — the protection diodes inside lead to it.',
+    'Сопр. открытого ключа': 'On-state resistance',
+    'Порог входа': 'Input threshold',
+    'Кварцевый генератор': 'Crystal oscillator',
+    'Готовый источник тактов: подал питание — и на выходе ровный меандр заданной частоты. Им тактируют процессор и счётчики, когда нужна точность. Низкий уровень на выводе РАЗР останавливает генерацию.':
+      'A ready-made clock source: give it power and a clean square wave of the set frequency comes out. Use it to clock a processor or a counter when accuracy matters. A low level on the EN pin stops it.',
+    'Матрица 8×8': 'Matrix 8×8',
+    'Шестьдесят четыре светодиода: аноды собраны по столбцам, катоды по рядам. Зажигать их приходится по одному ряду за раз — как раз то, что умеет MAX7219, у которого восемь разрядов и восемь сегментов.':
+      'Sixty-four LEDs: the anodes are gathered into columns and the cathodes into rows. They have to be lit one row at a time — exactly what a MAX7219 does with its eight digits and eight segments.',
+
+    /* выводы новых микросхем */
+    'Р8': 'R8',
+    'С1': 'C1', 'С2': 'C2', 'С3': 'C3', 'С4': 'C4',
+    'С5': 'C5', 'С6': 'C6', 'С7': 'C7', 'С8': 'C8',
+    '14 ТАКТ': '14 CLK', '15 СБР': '15 RST',
+    '3 Э': '3 E', '4 К': '4 C',
+    '1 ВХ1': '1 IN1', '2 ВХ2': '2 IN2', '3 ВХ3': '3 IN3', '4 ВХ4': '4 IN4',
+    '5 ВХ5': '5 IN5', '6 ВХ6': '6 IN6', '7 ВХ7': '7 IN7', '9 ОБЩ': '9 COM',
+    '10 ВЫХ7': '10 OUT7', '11 ВЫХ6': '11 OUT6', '12 ВЫХ5': '12 OUT5',
+    '13 ВЫХ4': '13 OUT4', '14 ВЫХ3': '14 OUT3', '15 ВЫХ2': '15 OUT2',
+    '16 ВЫХ1': '16 OUT1',
+    'ВХ1': 'IN1', 'ВХ2': 'IN2', 'ВХ3': 'IN3', 'ВХ4': 'IN4',
+    'ВХ5': 'IN5', 'ВХ6': 'IN6', 'ВХ7': 'IN7',
+    'ВЫХ1': 'OUT1', 'ВЫХ2': 'OUT2', 'ВЫХ3': 'OUT3', 'ВЫХ4': 'OUT4',
+    'ВЫХ5': 'OUT5', 'ВЫХ6': 'OUT6', 'ВЫХ7': 'OUT7',
+    '1 РАЗР': '1 EN', '8 ВЫХ': '8 OUT',
+    '÷10': '÷10',
+
+    /* новые схемы */
+    'Бегущие огни без процессора': 'Running lights with no processor',
+    'Таймер 555 отсчитывает такты, счётчик CD4017 переводит высокий уровень с одного выхода на следующий — и огонёк бежит по десяти светодиодам. Ни одной строчки программы: так это делали задолго до микроконтроллеров. Скорость меняется резисторами R1 и R2.':
+      'A 555 counts out the beats and a CD4017 moves the high level from one output to the next — and the light runs along ten LEDs. Not a line of program: this is how it was done long before microcontrollers. R1 and R2 change the speed.',
+    'Точка бежит по матрице 8×8': 'A dot running across an 8×8 matrix',
+    'Шестьдесят четыре светодиода и всего три провода от процессора: драйвер MAX7219 перебирает ряды сам. Столбцы подключены так, что старший бит байта — это левая точка ряда, поэтому байтами можно рисовать картинки. Программа лежит в свойствах процессора.':
+      'Sixty-four LEDs and only three wires from the processor: the MAX7219 scans the rows itself. The columns are wired so that the top bit of a byte is the leftmost dot of a row, so pictures can be drawn with bytes. The program is in the processor’s properties.'
+  });
+
+  /* ------------------- программа для матрицы 8×8 --------------------- */
+
+  add({
+    '; Точка бежит по матрице 8×8 через драйвер MAX7219.\n; P0 — ДАН, P1 — ТАКТ, P2 — ЗАГР.\n\n        LDI 0b0111\n        DIR\n        LDI 0x0C\n        ST 0xF2\n        LDI 0x01\n        ST 0xF3\n        CALL слово          ; выйти из режима покоя\n        LDI 0x0B\n        ST 0xF2\n        LDI 0x07\n        ST 0xF3\n        CALL слово          ; все восемь рядов\n        LDI 0x09\n        ST 0xF2\n        LDI 0\n        ST 0xF3\n        CALL слово          ; без дешифратора: биты прямо на столбцы\n        LDI 0x0A\n        ST 0xF2\n        LDI 0x0F\n        ST 0xF3\n        CALL слово          ; полная яркость\n        LDI 1\n        ST 0xF6             ; номер ряда, 1…8\n        LDI 0x80\n        ST 0xF7             ; маска точки в ряду\n\nцикл:   LD 0xF6\n        ST 0xF2\n        LDI 0\n        ST 0xF3\n        CALL слово          ; гасим ряд, где точка была\n        LD 0xF7\n        SHR\n        JNZ тотже\n        LDI 0x80\n        ST 0xF7             ; ряд кончился — точка слева и строкой ниже\n        LD 0xF6\n        INC\n        CMPI 9\n        JNZ рядок\n        LDI 1\nрядок:  ST 0xF6\n        JMP рисуем\nтотже:  ST 0xF7\nрисуем: LD 0xF6\n        ST 0xF2\n        LD 0xF7\n        ST 0xF3\n        CALL слово\n        CALL пауза\n        JMP цикл\n\n; посылка 16 бит: старший байт 0xF2, младший 0xF3\nслово:  LDI 0\n        OUT                 ; ЗАГР вниз\n        LD 0xF2\n        ST 0xF0\n        CALL посыл\n        LD 0xF3\n        ST 0xF0\n        CALL посыл\n        LDI 0b0100\n        OUT                 ; фронт ЗАГР — слово принято\n        LDI 0\n        OUT\n        RET\n\n; побайтная выдача, старшим битом вперёд\nпосыл:  LDI 8\n        ST 0xF1\nбит:    LD 0xF0\n        SHL\n        ST 0xF0\n        JC един\n        LDI 0\n        JMP выдать\nедин:   LDI 1\nвыдать: OUT\n        ORI 0b0010\n        OUT                 ; фронт такта\n        ANDI 0b1101\n        OUT\n        LD 0xF1\n        DEC\n        ST 0xF1\n        JNZ бит\n        RET\n\nпауза:  LDI 12\n        ST 0xF4\nвнеш:   LDI 12\n        ST 0xF5\nвнутр:  LD 0xF5\n        DEC\n        ST 0xF5\n        JNZ внутр\n        LD 0xF4\n        DEC\n        ST 0xF4\n        JNZ внеш\n        RET':
+      '; A dot runs across an 8×8 matrix through a MAX7219 driver.\n; P0 — DIN, P1 — CLK, P2 — LOAD.\n\n        LDI 0b0111\n        DIR\n        LDI 0x0C\n        ST 0xF2\n        LDI 0x01\n        ST 0xF3\n        CALL word           ; leave idle mode\n        LDI 0x0B\n        ST 0xF2\n        LDI 0x07\n        ST 0xF3\n        CALL word           ; all eight rows\n        LDI 0x09\n        ST 0xF2\n        LDI 0\n        ST 0xF3\n        CALL word           ; no decoder: bits go straight to the columns\n        LDI 0x0A\n        ST 0xF2\n        LDI 0x0F\n        ST 0xF3\n        CALL word           ; full brightness\n        LDI 1\n        ST 0xF6             ; row number, 1…8\n        LDI 0x80\n        ST 0xF7             ; the dot mask within the row\n\nloop:   LD 0xF6\n        ST 0xF2\n        LDI 0\n        ST 0xF3\n        CALL word           ; blank the row the dot was in\n        LD 0xF7\n        SHR\n        JNZ same\n        LDI 0x80\n        ST 0xF7             ; row done — the dot goes left and one row down\n        LD 0xF6\n        INC\n        CMPI 9\n        JNZ setrow\n        LDI 1\nsetrow: ST 0xF6\n        JMP draw\nsame:   ST 0xF7\ndraw:   LD 0xF6\n        ST 0xF2\n        LD 0xF7\n        ST 0xF3\n        CALL word\n        CALL delay\n        JMP loop\n\n; send 16 bits: high byte 0xF2, low byte 0xF3\nword:   LDI 0\n        OUT                 ; LOAD low\n        LD 0xF2\n        ST 0xF0\n        CALL send\n        LD 0xF3\n        ST 0xF0\n        CALL send\n        LDI 0b0100\n        OUT                 ; LOAD edge — the word is taken\n        LDI 0\n        OUT\n        RET\n\n; send a byte, top bit first\nsend:   LDI 8\n        ST 0xF1\nbit:    LD 0xF0\n        SHL\n        ST 0xF0\n        JC one\n        LDI 0\n        JMP put\none:    LDI 1\nput:    OUT\n        ORI 0b0010\n        OUT                 ; clock edge\n        ANDI 0b1101\n        OUT\n        LD 0xF1\n        DEC\n        ST 0xF1\n        JNZ bit\n        RET\n\ndelay:  LDI 12\n        ST 0xF4\nouter:  LDI 12\n        ST 0xF5\ninner:  LD 0xF5\n        DEC\n        ST 0xF5\n        JNZ inner\n        LD 0xF4\n        DEC\n        ST 0xF4\n        JNZ outer\n        RET',
+  });
+
+  /* ------------- описание новых микросхем для ИИ ---------------- */
+
+  add({
+    'matrix8 — МАТРИЦА 8×8':
+      'matrix8 — AN 8×8 MATRIX',
+    'Шестьдесят четыре точки: выводы Р1…Р8 — ряды (катоды), С1…С8 —':
+      'Sixty-four dots: pins R1…R8 are the rows (cathodes), C1…C8 the',
+    'столбцы (аноды). Драйвер max7219 подходит к ней целиком: его':
+      'columns (anodes). A max7219 fits it exactly: its eight digits are the',
+    'восемь разрядов это ряды, восемь сегментов — столбцы. Дешифратор':
+      'rows and its eight segments the columns. The decoder is switched off',
+    'при этом выключают (0x0900), и байт разряда прямо рисует ряд.':
+      '(0x0900) and then a digit byte draws a row directly.',
+    'Чтобы старший бит байта светил слева, столбцы соединяют так:':
+      'So that the top bit of a byte lights the leftmost dot, wire the columns:',
+    '  С1 ← СЕГ DP, С2 ← СЕГ A, С3 ← СЕГ B, С4 ← СЕГ C,':
+      '  C1 ← SEG DP, C2 ← SEG A, C3 ← SEG B, C4 ← SEG C,',
+    '  С5 ← СЕГ D, С6 ← СЕГ E, С7 ← СЕГ F, С8 ← СЕГ G':
+      '  C5 ← SEG D, C6 ← SEG E, C7 ← SEG F, C8 ← SEG G',
+    ' 9. СЧЁТЧИКИ, КЛЮЧИ И РАЗВЯЗКА':
+      ' 9. COUNTERS, DRIVERS AND ISOLATION',
+    'cd4017 — ДЕСЯТИЧНЫЙ СЧЁТЧИК':
+      'cd4017 — A DECADE COUNTER',
+    'Высокий уровень стоит на одном из десяти выходов и по каждому':
+      'A high level sits on one of ten outputs and moves to the next on every',
+    'фронту на выводе ТАКТ (13) переходит к следующему. Так делают':
+      'edge at the CLK pin (13). This is how running lights are made with no',
+    'бегущие огни вообще без программы: тактируют от ne555.':
+      'program at all: clock it from an ne555.',
+    '  выходы Q0…Q9 — выводы 2, 1, 3, 6, 9, 0, 4, 5, 8, 10':
+      '  outputs Q0…Q9 are pins 2, 1, 3, 6, 9, 0, 4, 5, 8, 10',
+    '  ТАКТ — 13, СБР — 14 (единица возвращает счёт в начало),':
+      '  CLK is 13, RST is 14 (a one sends the count back to the start),',
+    '  /РАЗР — 12 (держать на земле), ÷10 — 11, питание 15, земля 7':
+      '  /EN is 12 (hold it at ground), ÷10 is 11, power 15, ground 7',
+    'uln2003 — СЕМЬ СИЛОВЫХ КЛЮЧЕЙ':
+      'uln2003 — SEVEN POWER DRIVERS',
+    'Логическая единица на входе притягивает соответствующий выход':
+      'A logic one on an input pulls the matching output down to ground',
+    'к общему проводу и держит до полуампера — этим включают реле,':
+      'and holds up to half an amp — that is how relays, lamps and windings',
+    'лампы и обмотки. Нагрузку вешают между плюсом питания и выходом.':
+      'are switched. Hang the load between the plus of the supply and the output.',
+    '  входы ВХ1…ВХ7 — выводы 0…6, земля — 7, ОБЩ — 8':
+      '  inputs IN1…IN7 are pins 0…6, ground is 7, COM is 8',
+    '  выходы ВЫХ1…ВЫХ7 — выводы 15, 14, 13, 12, 11, 10, 9':
+      '  outputs OUT1…OUT7 are pins 15, 14, 13, 12, 11, 10, 9',
+    'Вывод ОБЩ соединяют с плюсом нагрузки: внутри к нему идут':
+      'Connect COM to the plus of the load: the protection diodes inside lead',
+    'защитные диоды, без них обмотка реле пробьёт ключ.':
+      'to it, and without them a relay coil will punch through the driver.',
+    'optocoupler — ОПТРОН':
+      'optocoupler — AN OPTOCOUPLER',
+    'Светодиод (выводы 0 и 1) и фототранзистор (коллектор 3, эмиттер':
+      'An LED (pins 0 and 1) and a phototransistor (collector 3, emitter',
+    '2) в одном корпусе. Току светодиода нужен свой резистор, ток':
+      '2) in one package. The LED needs its own resistor, and the collector',
+    'коллектора получается во столько раз больше, сколько указано':
+      'current comes out as many times larger as the ctr setting says.',
+    'в параметре ctr. Ставят, чтобы слаботочная часть и силовая не':
+      'Use it so that the low-power side and the power side share no',
+    'имели общих проводов.':
+      'wires at all.',
+    'oscillator — КВАРЦЕВЫЙ ГЕНЕРАТОР':
+      'oscillator — A CRYSTAL OSCILLATOR',
+    'Питание на вывод 3, земля на 1, меандр снимают с вывода 2.':
+      'Power to pin 3, ground to pin 1, the square wave comes off pin 2.',
+    'Частота задаётся параметром freq. Им удобно тактировать':
+      'The freq setting picks the frequency. It is the handy way to clock',
+    'процессор EC-8B и счётчики, когда нужна ровная частота.':
+      'the EC-8B processor and counters when the rate must be steady.',
+    'dff — D-ТРИГГЕР':
+      'dff — A D FLIP-FLOP',
+    'Вход D — 0, такт C — 1, сброс /СБР — 2, выходы Q — 3 и /Q — 4.':
+      'Input D is 0, clock C is 1, reset /RST is 2, outputs Q is 3 and /Q is 4.',
+    'По фронту такта Q принимает то, что было на D. Если соединить':
+      'On a clock edge Q takes whatever was on D. Join /Q to input D and',
+    '/Q со входом D, получится делитель частоты на два.':
+      'you get a divide-by-two.',
+    'Логические элементы: not_gate, and_gate, or_gate, nand_gate,':
+      'Logic gates: not_gate, and_gate, or_gate, nand_gate,',
+    'nor_gate, xor_gate. У них по два входа (у НЕ один) и выход,':
+      'nor_gate, xor_gate. Each has two inputs (NOT has one) and an output;',
+    'питание задаётся параметром Vcc, отдельных выводов питания нет.':
+      'the supply is set by the Vcc setting, there are no separate power pins.',
+    ' 10. ПРОВЕРЬ ПЕРЕД ОТВЕТОМ':
+      ' 10. CHECK BEFORE YOU ANSWER',
+  });
 })(window);
