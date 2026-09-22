@@ -489,6 +489,226 @@ test('Сохранение и загрузка схемы', function () {
   check('расчёт совпадает', r2.i, i1, 1e-9);
 });
 
+test('Диод Шоттки: малое прямое падение', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 5; bat.props.Rint = 1e-6;
+  const r = ct.add('resistor', 8, 0); r.props.R = 1000;
+  const d = ct.add('schottky', 16, 0);
+  const gnd = ct.add('ground', 0, 8);
+  ct.connect(bat.id, 0, r.id, 0);
+  ct.connect(r.id, 1, d.id, 0);
+  ct.connect(d.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 1e-3);
+  check('падение 0,2…0,45 В', d.v > 0.2 && d.v < 0.45 ? 1 : 0, 1, 0);
+  check('меньше, чем у кремниевого', d.v < 0.6 ? 1 : 0, 1, 0);
+});
+
+test('Диодный мост выпрямляет обе полуволны', function () {
+  const ct = new EC.Circuit();
+  const src = ct.add('vsource', 0, 0);
+  src.props.wave = 'sine'; src.props.amp = 12; src.props.freq = 50; src.props.Rint = 0.1;
+  const br = ct.add('bridge', 10, 0);
+  const load = ct.add('resistor', 20, 0); load.props.R = 1000;
+  const gnd = ct.add('ground', 0, 10);
+  ct.connect(src.id, 0, br.id, 0);
+  ct.connect(src.id, 1, br.id, 1);
+  ct.connect(br.id, 2, load.id, 0);
+  ct.connect(load.id, 1, br.id, 3);
+  ct.connect(br.id, 3, gnd.id, 0);
+  const dt = 2e-6;
+  for (let i = 0; i < 20000; i++) ct.step(dt);       // переходный процесс
+  let minV = 1e9, maxV = -1e9, negative = 0, n = 0;
+  for (let i = 0; i < 20000; i++) {
+    ct.step(dt);
+    const v = load.v;
+    minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+    if (v < -0.05) negative++;
+    n++;
+  }
+  check('на нагрузке нет отрицательного напряжения', negative, 0, 0);
+  check('вершина ≈ 12 − 2·Uд', maxV, 10.6, 0.7);
+  check('форма пульсирующая (провалы до нуля)', minV < 0.5 ? 1 : 0, 1, 0);
+});
+
+test('Трансформатор понижает напряжение', function () {
+  const ct = new EC.Circuit();
+  const src = ct.add('vsource', 0, 0);
+  src.props.wave = 'sine'; src.props.amp = 12; src.props.freq = 50; src.props.Rint = 0.01;
+  const tr = ct.add('transformer', 12, 0);
+  tr.props.L1 = 20; tr.props.ratio = 2; tr.props.k = 0.999;
+  tr.props.R1 = 0.5; tr.props.R2 = 0.2;
+  const load = ct.add('resistor', 24, 0); load.props.R = 100;
+  const gnd = ct.add('ground', 0, 10);
+  ct.connect(src.id, 0, tr.id, 0);
+  ct.connect(src.id, 1, tr.id, 1);
+  ct.connect(tr.id, 1, gnd.id, 0);
+  ct.connect(tr.id, 2, load.id, 0);
+  ct.connect(load.id, 1, tr.id, 3);
+  const dt = 2e-6;
+  for (let i = 0; i < 60000; i++) ct.step(dt);
+  let peak = 0, peakP = 0;
+  for (let i = 0; i < 20000; i++) {
+    ct.step(dt);
+    peak = Math.max(peak, Math.abs(load.v));
+    peakP = Math.max(peakP, Math.abs(tr.v));
+  }
+  check('на первичной ≈ 12 В', peakP, 12, 0.6);
+  check('на вторичной ≈ 12/2', peak, 6, 0.7);
+});
+
+test('Стабилизатор напряжения', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 12; bat.props.Rint = 0.01;
+  const reg = ct.add('regulator', 10, 0); reg.props.Vout = 5; reg.props.drop = 2;
+  const load = ct.add('resistor', 20, 0); load.props.R = 100;
+  const gnd = ct.add('ground', 0, 10);
+  ct.connect(bat.id, 0, reg.id, 0);
+  ct.connect(reg.id, 1, gnd.id, 0);
+  ct.connect(reg.id, 2, load.id, 0);
+  ct.connect(load.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 2e-3);
+  check('на выходе 5 В', load.v, 5, 0.05);
+  check('ток нагрузки 50 мА', Math.abs(load.i), 0.05, 0.001);
+  check('вход отдаёт тот же ток', Math.abs(bat.i), 0.05, 0.002);
+  check('рассеиваемая мощность (12−5)·I', reg.p, 0.35, 0.02);
+  bat.props.V = 20;
+  run(ct, 2e-3);
+  check('при 20 В на входе выход прежний', load.v, 5, 0.05);
+  bat.props.V = 6;                                   // запаса не хватает
+  run(ct, 2e-3);
+  check('при 6 В выход просаживается', load.v < 4.3 ? 1 : 0, 1, 0);
+  check('выдано предупреждение', reg.warn ? 1 : 0, 1, 0);
+});
+
+test('Термистор и фоторезистор', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 5; bat.props.Rint = 1e-6;
+  const th = ct.add('thermistor', 10, 0);
+  const gnd = ct.add('ground', 0, 10);
+  ct.connect(bat.id, 0, th.id, 0);
+  ct.connect(th.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  th.props.t = 25;
+  run(ct, 1e-3);
+  check('при 25 °C сопротивление равно номиналу', th.R, 10000, 1);
+  th.props.t = 85;
+  run(ct, 1e-3);
+  check('при 85 °C сопротивление падает', th.R < 1500 ? 1 : 0, 1, 0);
+  th.props.t = -10;
+  run(ct, 1e-3);
+  check('на морозе растёт', th.R > 50000 ? 1 : 0, 1, 0);
+
+  const ct2 = new EC.Circuit();
+  const b2 = ct2.add('battery', 0, 0); b2.props.V = 5; b2.props.Rint = 1e-6;
+  const ldr = ct2.add('photoresistor', 10, 0);
+  const g2 = ct2.add('ground', 0, 10);
+  ct2.connect(b2.id, 0, ldr.id, 0);
+  ct2.connect(ldr.id, 1, g2.id, 0);
+  ct2.connect(b2.id, 1, g2.id, 0);
+  ldr.props.light = 0.25;                            // темно
+  run(ct2, 1e-3);
+  const dark = ldr.R;
+  ldr.props.light = 1;                               // ярко
+  run(ct2, 1e-3);
+  check('на свету сопротивление меньше', ldr.R < dark / 5 ? 1 : 0, 1, 0);
+});
+
+test('Двигатель постоянного тока', function () {
+  // 12 В, R = 8 Ω, Ke = 0,02, трение 2e-5 -> w = 12/(R·b/Kt + Ke) = 428,6 рад/с
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 12; bat.props.Rint = 1e-6;
+  const m = ct.add('motor', 10, 0);
+  m.props.R = 8; m.props.Ke = 0.02; m.props.J = 2e-5; m.props.b = 2e-5; m.props.load = 0;
+  const gnd = ct.add('ground', 0, 10);
+  ct.connect(bat.id, 0, m.id, 0);
+  ct.connect(m.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 0.0005, 1e-6);
+  check('в первый момент ток пусковой ≈ U/R', Math.abs(m.i), 12 / 8, 0.2);
+  run(ct, 3, 1e-5);
+  const w = m.state.w;
+  check('установившаяся скорость', w, 12 / (8 * 2e-5 / 0.02 + 0.02), 12);
+  check('установившийся ток', m.i, 2e-5 * w / 0.02, 0.01);
+  check('противо-ЭДС = Ke·w', 12 - m.i * 8, 0.02 * w, 0.05);
+  // с моментом нагрузки M: w = (U − M·R/Kt) / (R·b/Kt + Ke)
+  const M = 0.005;
+  m.props.load = M;
+  run(ct, 3, 1e-5);
+  const wLoaded = (12 - M * 8 / 0.02) / (8 * 2e-5 / 0.02 + 0.02);
+  check('скорость под нагрузкой', m.state.w, wLoaded, 10);
+  check('скорость упала', m.state.w < w ? 1 : 0, 1, 0);
+  check('ток вырос', Math.abs(m.i) > 2e-5 * w / 0.02 ? 1 : 0, 1, 0);
+});
+
+test('Логические элементы', function () {
+  function gateTest(type, a, b, expect) {
+    const ct = new EC.Circuit();
+    const g = ct.add(type, 10, 0);
+    const gnd = ct.add('ground', 0, 14);
+    const inputs = EC.defs[type].inputs;
+    const srcs = [];
+    for (let k = 0; k < inputs; k++) {
+      const s = ct.add('vsource', 0, k * 6);
+      s.props.wave = 'dc'; s.props.Rint = 1;
+      s.props.amp = (k === 0 ? a : b) ? 5 : 0;
+      ct.connect(s.id, 0, g.id, k);
+      ct.connect(s.id, 1, gnd.id, 0);
+      srcs.push(s);
+    }
+    const load = ct.add('resistor', 20, 0); load.props.R = 10000;
+    ct.connect(g.id, inputs, load.id, 0);
+    ct.connect(load.id, 1, gnd.id, 0);
+    run(ct, 2e-3);
+    const high = load.v > 2.5;
+    check(type + ' ' + (a ? 1 : 0) + (inputs > 1 ? ',' + (b ? 1 : 0) : '') + ' → ' + (expect ? 1 : 0),
+      high === expect ? 1 : 0, 1, 0);
+  }
+  gateTest('not_gate', false, false, true);
+  gateTest('not_gate', true, false, false);
+  gateTest('and_gate', false, false, false);
+  gateTest('and_gate', true, false, false);
+  gateTest('and_gate', false, true, false);
+  gateTest('and_gate', true, true, true);
+  gateTest('or_gate', false, false, false);
+  gateTest('or_gate', true, false, true);
+  gateTest('or_gate', true, true, true);
+});
+
+test('Таймер 555 в автоколебательном режиме', function () {
+  // f = 1,44 / ((R1 + 2·R2)·C)
+  const R1 = 10000, R2 = 10000, C = 10e-6;
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 9; bat.props.Rint = 0.01;
+  const t = ct.add('ne555', 14, 0);
+  const r1 = ct.add('resistor', 8, -10); r1.props.R = R1;
+  const r2 = ct.add('resistor', 20, -10); r2.props.R = R2;
+  const cap = ct.add('capacitor', 26, 6); cap.props.C = C;
+  const gnd = ct.add('ground', 0, 14);
+  ct.connect(bat.id, 0, t.id, 0);            // питание
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(t.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 0, r1.id, 0);           // R1: питание → разряд
+  ct.connect(r1.id, 1, t.id, 4);
+  ct.connect(t.id, 4, r2.id, 0);             // R2: разряд → порог
+  ct.connect(r2.id, 1, t.id, 3);
+  ct.connect(t.id, 3, t.id, 2);              // порог соединён с запуском
+  ct.connect(t.id, 3, cap.id, 0);            // конденсатор на землю
+  ct.connect(cap.id, 1, gnd.id, 0);
+  const dt = 5e-5;
+  for (let i = 0; i < 20000; i++) ct.step(dt);
+  let prev = t.state.q, edges = [], time0 = ct.time;
+  for (let i = 0; i < 400000; i++) {
+    ct.step(dt);
+    if (t.state.q && !prev) edges.push(ct.time);
+    prev = t.state.q;
+  }
+  check('генерация есть', edges.length > 3 ? 1 : 0, 1, 0);
+  const f = (edges.length - 1) / (edges[edges.length - 1] - edges[0]);
+  check('частота 1,44/((R1+2R2)C)', f, 1.44 / ((R1 + 2 * R2) * C), 0.5);
+});
+
 console.log('\n' + '─'.repeat(50));
 console.log(failed === 0 ? `Все проверки пройдены: ${passed}` : `Пройдено ${passed}, провалено ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

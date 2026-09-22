@@ -569,6 +569,35 @@ input[type=range]::-moz-range-thumb {
   color: var(--accent-2) !important;
 }
 
+.swatches { display: flex; flex-wrap: wrap; gap: 5px; }
+.swatch {
+  width: 26px; height: 26px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 -3px 5px rgba(0,0,0,.28), 0 1px 2px rgba(0,0,0,.2);
+  padding: 0;
+}
+.swatch.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+.ex-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.ex-card {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 11px 13px;
+  text-align: left;
+  background: var(--fill-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .13s, border-color .13s;
+}
+.ex-card:hover { background: var(--hover); border-color: var(--accent-line); }
+.ex-name { font-size: 13.5px; font-weight: 600; }
+.ex-hint { font-size: 11.5px; color: var(--text-mute); line-height: 1.45; }
+@media (max-width: 720px) { .ex-list { grid-template-columns: 1fr; } }
+
 /* =============================== Модалка ================================ */
 
 .modal {

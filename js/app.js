@@ -21,7 +21,8 @@
     maxSteps: 900,
     dtMode: 'auto',
     lastRate: 1,
-    skin: 'real'
+    skin: 'real',
+    sound: true
   };
 
   /* Оформление подписей и плашек для каждого вида стола. */
@@ -277,9 +278,6 @@
     $('btnFit').addEventListener('click', function () { renderer.fit(); });
     $('btnZoomIn').addEventListener('click', function () { zoomBy(1.25); });
     $('btnZoomOut').addEventListener('click', function () { zoomBy(0.8); });
-    $('exampleSelect').addEventListener('change', function (e) {
-      if (e.target.value) { loadExample(e.target.value); e.target.value = ''; }
-    });
   }
 
   function setMode(m) {
@@ -358,6 +356,10 @@
     bindOption('optCurrent', 'showCurrent');
     bindOption('optVoltage', 'showVoltage');
     bindOption('optGrid', 'grid');
+    $('optSound').addEventListener('change', function (e) {
+      state.sound = e.target.checked;
+      if (!state.sound) silenceAll(); else wakeAudio();
+    });
 
     $('optSpeed').addEventListener('input', function (e) {
       state.speed = Math.pow(10, parseFloat(e.target.value));
@@ -390,9 +392,23 @@
   }
 
   function buildExamples() {
-    var sel = $('exampleSelect');
+    var list = $('exampleList');
     EC.examples.forEach(function (ex) {
-      sel.appendChild(U.el('option', { value: ex.id, text: ex.name }));
+      var card = U.el('button', { class: 'ex-card' });
+      card.appendChild(U.el('span', { class: 'ex-name', text: ex.name }));
+      card.appendChild(U.el('span', { class: 'ex-hint', text: ex.hint }));
+      card.addEventListener('click', function () {
+        $('exampleModal').hidden = true;
+        loadExample(ex.id);
+      });
+      list.appendChild(card);
+    });
+    $('btnExamples').addEventListener('click', function () {
+      $('exampleModal').hidden = false;
+    });
+    $('exampleClose').addEventListener('click', function () { $('exampleModal').hidden = true; });
+    $('exampleModal').addEventListener('click', function (e) {
+      if (e.target === $('exampleModal')) $('exampleModal').hidden = true;
     });
   }
 
@@ -500,6 +516,7 @@
   }
 
   function bindBoard() {
+    board.addEventListener('pointerdown', wakeAudio);
     board.addEventListener('pointerdown', onPointerDown);
     board.addEventListener('pointermove', onPointerMove);
     board.addEventListener('pointerup', onPointerUp);
@@ -598,7 +615,14 @@
     if (wire) {
       renderer.selection = [wire];
       updateInspector();
-      state.action = { type: 'wiresel' };
+      markInspectorAvailable();
+      var handle = renderer.wireMidAt(w.x, w.y, touch ? 0.9 : 0.55);
+      if (handle === wire) {
+        pushUndo();
+        state.action = { type: 'wiremove', wire: wire, moved: false };
+      } else {
+        state.action = { type: 'wiresel' };
+      }
       return;
     }
 
@@ -655,6 +679,11 @@
       if (dx || dy) act.moved = true;
       act.origin.forEach(function (o) { o.c.x = o.x + dx; o.c.y = o.y + dy; });
       circuit.dirty = true;
+      return;
+    }
+    if (act.type === 'wiremove') {
+      var nm = Math.round(act.wire.axis === 'v' ? w.y : w.x);
+      if (nm !== act.wire.mid) { act.wire.mid = nm; act.moved = true; }
       return;
     }
     if (act.type === 'marquee') {
@@ -818,9 +847,43 @@
       ws.appendChild(readouts([
         { k: 'Ток', v: U.fmtSI(item.current || 0, 4) + 'А', cls: 'amber' }
       ]));
+
+      var cf = U.el('div', { class: 'field' });
+      cf.style.marginTop = '10px';
+      cf.appendChild(U.el('label', { text: 'Цвет изоляции' }));
+      var sw = U.el('div', { class: 'swatches' });
+      EC.WIRE_COLORS.forEach(function (col, idx) {
+        var b = U.el('button', {
+          class: 'swatch' + (idx === item.color ? ' on' : ''),
+          title: col.name
+        });
+        b.style.background = col.core;
+        b.addEventListener('click', function () {
+          item.color = idx;
+          updateInspector();
+        });
+        sw.appendChild(b);
+      });
+      cf.appendChild(sw);
+      ws.appendChild(cf);
+
+      ws.appendChild(U.el('div', {
+        class: 'insp-tip',
+        text: 'Потяните за середину провода, чтобы переложить его на другую линию коврика.'
+      }));
+
       var wa = U.el('div', { class: 'insp-actions' });
-      wa.style.marginTop = '10px';
-      wa.appendChild(actionBtn('Удалить провод', function () {
+      wa.appendChild(actionBtn('Переложить', function () {
+        pushUndo();
+        item.mid = undefined;
+        item.mid = circuit.chooseMid(item);
+      }));
+      wa.appendChild(actionBtn('Развернуть', function () {
+        pushUndo();
+        item.axis = item.axis === 'v' ? 'h' : 'v';
+        item.mid = circuit.chooseMid(item);
+      }));
+      wa.appendChild(actionBtn('Удалить', function () {
         pushUndo(); circuit.removeWire(item); renderer.selection = []; updateInspector();
       }, 'danger'));
       ws.appendChild(wa);
@@ -952,10 +1015,11 @@
         min: p.min, max: p.max, step: p.step || 0.01
       });
       rg.value = c.props[p.key];
-      var val = U.el('span', { class: 'val', text: Math.round(c.props[p.key] * 100) + '%' });
+      var fmt = p.display || function (v) { return Math.round(v * 100) + '%'; };
+      var val = U.el('span', { class: 'val', text: fmt(c.props[p.key]) });
       rg.addEventListener('input', function () {
         c.props[p.key] = parseFloat(rg.value);
-        val.textContent = Math.round(c.props[p.key] * 100) + '%';
+        val.textContent = fmt(c.props[p.key]);
       });
       row.appendChild(rg);
       row.appendChild(val);
@@ -1159,6 +1223,65 @@
   }
 
   /* ================================================================== */
+  /*  Звук зуммеров                                                     */
+  /* ================================================================== */
+
+  var audio = { ctx: null, voices: {} };
+
+  /** Звук можно запускать только после действия пользователя. */
+  function wakeAudio() {
+    if (!state.sound || audio.ctx) return;
+    var AC = global.AudioContext || global.webkitAudioContext;
+    if (!AC) return;
+    try {
+      audio.ctx = new AC();
+      if (audio.ctx.state === 'suspended') audio.ctx.resume();
+    } catch (e) { audio.ctx = null; }
+  }
+
+  function silenceAll() {
+    for (var id in audio.voices) stopVoice(id);
+  }
+
+  function stopVoice(id) {
+    var v = audio.voices[id];
+    if (!v) return;
+    try { v.gain.gain.value = 0; v.osc.stop(); v.osc.disconnect(); v.gain.disconnect(); }
+    catch (e) { /* уже остановлен */ }
+    delete audio.voices[id];
+  }
+
+  /** Громкость каждого зуммера следует за его током. */
+  function updateSound() {
+    if (!state.sound || !audio.ctx) { if (!state.sound) silenceAll(); return; }
+    var live = {};
+    for (var i = 0; i < circuit.components.length; i++) {
+      var c = circuit.components[i];
+      if (c.type !== 'buzzer') continue;
+      var loud = state.running ? U.clamp(c.loud || 0, 0, 1) : 0;
+      if (loud < 0.06) continue;
+      live[c.id] = true;
+      var v = audio.voices[c.id];
+      if (!v) {
+        try {
+          var osc = audio.ctx.createOscillator();
+          var gain = audio.ctx.createGain();
+          osc.type = 'square';
+          gain.gain.value = 0;
+          osc.connect(gain);
+          gain.connect(audio.ctx.destination);
+          osc.start();
+          v = audio.voices[c.id] = { osc: osc, gain: gain };
+        } catch (e) { continue; }
+      }
+      v.osc.frequency.value = U.clamp(c.props.freq, 50, 8000);
+      // несколько зуммеров не должны складываться в грохот
+      v.gain.gain.value = 0.04 * loud;
+    }
+    for (var id in audio.voices) if (!live[id]) stopVoice(id);
+  }
+
+  /* ================================================================== */
   /*  Шаг расчёта                                                       */
   /* ================================================================== */
 
@@ -1227,6 +1350,7 @@
 
     frameCount++;
     if (frameCount % 6 === 0) {
+      updateSound();
       updateHud();
       updateReadouts();
       updateScopeStats();

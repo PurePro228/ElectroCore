@@ -9,12 +9,30 @@
   var EC = global.EC, U = EC.util, SOL = EC.solver;
   var GRID = EC.GRID;
 
+  /* Цвета изоляции как в наборах перемычек Dupont. */
+  var WIRE_COLORS = [
+    { name: 'красный',   core: '#d8413a', dark: '#7d1f1a', hi: 'rgba(255,190,180,.45)' },
+    { name: 'синий',     core: '#2f74c8', dark: '#153a6b', hi: 'rgba(185,215,255,.45)' },
+    { name: 'зелёный',   core: '#35a35c', dark: '#155c2f', hi: 'rgba(190,255,210,.42)' },
+    { name: 'жёлтый',    core: '#e3c02e', dark: '#836a10', hi: 'rgba(255,245,190,.5)' },
+    { name: 'белый',     core: '#e6ecf2', dark: '#8d97a1', hi: 'rgba(255,255,255,.6)' },
+    { name: 'оранжевый', core: '#e2802a', dark: '#824212', hi: 'rgba(255,215,175,.45)' },
+    { name: 'фиолетовый',core: '#8b5cc9', dark: '#452a6b', hi: 'rgba(225,200,255,.42)' },
+    { name: 'коричневый',core: '#8a5a33', dark: '#432a15', hi: 'rgba(230,200,175,.35)' },
+    { name: 'чёрный',    core: '#333b44', dark: '#14181d', hi: 'rgba(255,255,255,.18)' },
+    { name: 'серый',     core: '#8b97a3', dark: '#454e57', hi: 'rgba(255,255,255,.35)' }
+  ];
+  EC.WIRE_COLORS = WIRE_COLORS;
+
   var PREFIX = {
     resistor: 'R', capacitor: 'C', capacitor_pol: 'C', inductor: 'L', pot: 'RV',
     lamp: 'HL', fuse: 'FU', battery: 'GB', vsource: 'G', isource: 'I',
     switch: 'SA', button: 'SB', spdt: 'SA', relay: 'K', diode: 'VD', zener: 'VD',
     led: 'HL', npn: 'VT', pnp: 'VT', nmos: 'VT', pmos: 'VT', opamp: 'DA',
-    voltmeter: 'PV', ammeter: 'PA', wattmeter: 'PW', probe: 'X', ground: '', junction: ''
+    voltmeter: 'PV', ammeter: 'PA', wattmeter: 'PW', probe: 'X', ground: '', junction: '',
+    thermistor: 'RK', photoresistor: 'RL', transformer: 'TV', schottky: 'VD', bridge: 'VD',
+    regulator: 'DA', motor: 'M', buzzer: 'HA',
+    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD'
   };
 
   /* ------------------------------------------------------------------ */
@@ -69,8 +87,10 @@
     };
   };
 
+  /** Мощность. Элемент может считать её по-своему — например, стабилизатор. */
   Component.prototype.power = function () {
-    if (this.type === 'wattmeter') return this.reading || 0;
+    var def = this.def();
+    if (def.power) return def.power(this);
     return (this.v || 0) * (this.i || 0);
   };
 
@@ -162,25 +182,141 @@
       if ((w.a.c === ca && w.a.p === pa && w.b.c === cb && w.b.p === pb) ||
         (w.a.c === cb && w.a.p === pb && w.b.c === ca && w.b.p === pa)) return w;
     }
-    var wire = { id: U.uid('w'), a: { c: ca, p: pa }, b: { c: cb, p: pb }, current: 0 };
+    var compA = this.byId(ca);
+    var wire = {
+      id: U.uid('w'),
+      a: { c: ca, p: pa }, b: { c: cb, p: pb },
+      current: 0,
+      color: this.wires.length % WIRE_COLORS.length,
+      axis: 'h'
+    };
+    // провод отходит от вывода вдоль его направления
+    if (compA) {
+      var pin = compA.def().pins[pa];
+      var horiz = Math.abs(pin.x) >= Math.abs(pin.y);
+      if (compA.rot % 2 === 1) horiz = !horiz;
+      wire.axis = horiz ? 'h' : 'v';
+    }
     this.wires.push(wire);
+    wire.mid = this.chooseMid(wire);
     this.dirty = true;
     return wire;
   };
 
-  /** Ломаная провода в координатах сетки (ортогональная разводка). */
-  Circuit.prototype.wirePath = function (wire) {
+  /* ------------------------ разводка проводов ------------------------ */
+
+  /** Концы провода в координатах сетки. */
+  Circuit.prototype.wireEnds = function (wire) {
     var ca = this.byId(wire.a.c), cb = this.byId(wire.b.c);
     if (!ca || !cb) return null;
-    var pa = ca.pinPos(wire.a.p), pb = cb.pinPos(wire.b.p);
+    return { a: ca.pinPos(wire.a.p), b: cb.pinPos(wire.b.p) };
+  };
+
+  /** Разбивает ломаную на горизонтальные и вертикальные отрезки. */
+  function segmentsOf(path) {
+    var out = [];
+    for (var i = 1; i < path.length; i++) {
+      var a = path[i - 1], b = path[i];
+      var horiz = Math.abs(a.y - b.y) < 1e-6;
+      var vert = Math.abs(a.x - b.x) < 1e-6;
+      if (horiz && vert) continue;                 // нулевой отрезок
+      out.push(horiz
+        ? { horiz: true, fixed: a.y, lo: Math.min(a.x, b.x), hi: Math.max(a.x, b.x) }
+        : { horiz: false, fixed: a.x, lo: Math.min(a.y, b.y), hi: Math.max(a.y, b.y) });
+    }
+    return out;
+  }
+
+  /** Длина участка, на котором два отрезка лежат друг на друге. */
+  function overlapLen(p, q) {
+    if (p.horiz !== q.horiz) return 0;
+    if (Math.abs(p.fixed - q.fixed) > 0.01) return 0;
+    return Math.max(0, Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo));
+  }
+
+  /** Есть ли у проводов общий вывод (тогда наложение у него неизбежно). */
+  function sharesTerminal(w1, w2) {
+    var t = [w1.a, w1.b], u = [w2.a, w2.b];
+    for (var i = 0; i < 2; i++) {
+      for (var j = 0; j < 2; j++) if (t[i].c === u[j].c && t[i].p === u[j].p) return true;
+    }
+    return false;
+  }
+
+  /** Суммарная длина наложений маршрута на уже проложенные провода. */
+  Circuit.prototype.routeOverlap = function (wire, path) {
+    var mine = segmentsOf(path), total = 0;
+    for (var i = 0; i < this.wires.length; i++) {
+      var w = this.wires[i];
+      if (w === wire || sharesTerminal(wire, w)) continue;
+      var other = this.wirePath(w);
+      if (!other) continue;
+      var segs = segmentsOf(other);
+      for (var m = 0; m < mine.length; m++) {
+        for (var k = 0; k < segs.length; k++) total += overlapLen(mine[m], segs[k]);
+      }
+    }
+    return total;
+  };
+
+  /** Подбирает линию коврика, на которой маршрут ни на что не ложится. */
+  Circuit.prototype.chooseMid = function (wire) {
+    var e = this.wireEnds(wire);
+    if (!e) return 0;
+    var horiz = wire.axis !== 'v';
+    var base = Math.round(horiz ? (e.a.x + e.b.x) / 2 : (e.a.y + e.b.y) / 2);
+    var saved = wire.mid, best = base, bestScore = Infinity;
+    for (var d = 0; d <= 24 && bestScore > 0.01; d++) {
+      for (var k = 0; k < (d ? 2 : 1); k++) {
+        var m = base + (k ? -d : d);
+        wire.mid = m;
+        var path = this.wirePath(wire);
+        // небольшая надбавка за удаление от середины: при прочих равных ближе
+        var score = path ? this.routeOverlap(wire, path) + d * 0.02 : Infinity;
+        if (score < bestScore) { bestScore = score; best = m; }
+        if (bestScore <= 0.01) break;
+      }
+    }
+    wire.mid = saved;
+    return best;
+  };
+
+  /**
+   * Ломаная провода: два поворота под прямым углом, средний участок
+   * лежит на выбранной линии коврика и может переставляться на соседнюю.
+   */
+  Circuit.prototype.wirePath = function (wire) {
+    var e = this.wireEnds(wire);
+    if (!e) return null;
+    var pa = e.a, pb = e.b;
     if (Math.abs(pa.x - pb.x) < 1e-6 || Math.abs(pa.y - pb.y) < 1e-6) return [pa, pb];
-    // выбираем изгиб так, чтобы провод отходил вдоль направления вывода
-    var defA = ca.def().pins[wire.a.p];
-    var horizFirst = Math.abs(defA.x) >= Math.abs(defA.y);
-    if (ca.rot % 2 === 1) horizFirst = !horizFirst;
-    return horizFirst
-      ? [pa, { x: pb.x, y: pa.y }, pb]
-      : [pa, { x: pa.x, y: pb.y }, pb];
+    if (wire.mid === undefined) wire.mid = this.chooseMid(wire);
+    if (wire.axis === 'v') {
+      return [pa, { x: pa.x, y: wire.mid }, { x: pb.x, y: wire.mid }, pb];
+    }
+    return [pa, { x: wire.mid, y: pa.y }, { x: wire.mid, y: pb.y }, pb];
+  };
+
+  /**
+   * Пересчитывает разводку всех проводов. За один проход поздние провода
+   * обходят ранние, но не наоборот, поэтому проходов делается несколько,
+   * пока наложения не перестанут убывать.
+   */
+  Circuit.prototype.reroute = function (passes) {
+    var i, prev = Infinity;
+    for (i = 0; i < this.wires.length; i++) this.wires[i].mid = undefined;
+    for (var pass = 0; pass < (passes || 5); pass++) {
+      for (i = 0; i < this.wires.length; i++) {
+        this.wires[i].mid = this.chooseMid(this.wires[i]);
+      }
+      var total = 0;
+      for (i = 0; i < this.wires.length; i++) {
+        var path = this.wirePath(this.wires[i]);
+        if (path) total += this.routeOverlap(this.wires[i], path);
+      }
+      if (total <= 0.01 || total >= prev - 0.01) break;
+      prev = total;
+    }
   };
 
   /* ---------------------- построение узлов --------------------------- */
@@ -322,6 +458,8 @@
       prev.set(this.x);
       this.mna.clear();
       for (i = 0; i < comps.length; i++) comps[i].def().stamp(comps[i], ctx);
+      // утечка со всех узлов на землю: «висящие» участки схемы остаются решаемыми
+      for (i = 0; i < this.nodeCount; i++) this.mna.A[i][i] += ctx.gmin;
       if (!this.mna.solve()) {
         // вырожденная матрица — усиливаем утечки на землю и пробуем ещё раз
         ctx.gmin *= 1e3;
@@ -463,7 +601,9 @@
       components: this.components.map(function (c) {
         return { id: c.id, type: c.type, x: c.x, y: c.y, rot: c.rot, name: c.name, props: c.props };
       }),
-      wires: this.wires.map(function (w) { return { id: w.id, a: w.a, b: w.b }; })
+      wires: this.wires.map(function (w) {
+        return { id: w.id, a: w.a, b: w.b, color: w.color, axis: w.axis, mid: w.mid };
+      })
     };
   };
 
@@ -479,8 +619,13 @@
       for (var k in (d.props || {})) if (c.props[k] !== undefined || true) c.props[k] = d.props[k];
       ct.components.push(c);
     });
-    (data.wires || []).forEach(function (w) {
-      ct.wires.push({ id: w.id || U.uid('w'), a: w.a, b: w.b, current: 0 });
+    (data.wires || []).forEach(function (w, i) {
+      ct.wires.push({
+        id: w.id || U.uid('w'), a: w.a, b: w.b, current: 0,
+        color: w.color === undefined ? i % WIRE_COLORS.length : w.color,
+        axis: w.axis || 'h',
+        mid: w.mid
+      });
     });
     ct.dirty = true;
     return ct;

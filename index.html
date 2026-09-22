@@ -42,13 +42,9 @@
 
     <div class="spacer"></div>
 
-    <div class="tool-group examples-group">
-      <select id="exampleSelect" class="select" title="Готовые схемы">
-        <option value="">Примеры схем…</option>
-      </select>
-    </div>
 
     <div class="tool-group right-group">
+      <button id="btnExamples" class="btn" title="Готовые схемы">▤<span class="lbl">Примеры</span></button>
       <button id="btnSkin" class="btn" title="Переключить вид: детали или схема">◧<span class="lbl">Вид</span></button>
       <button id="btnFit" class="btn" title="Вписать в экран">⤢</button>
       <button id="btnMenu" class="btn" title="Файл и настройки">☰</button>
@@ -164,8 +160,9 @@
     <hr>
     <label class="menu-check"><input type="checkbox" id="optValues" checked> Показывать U / I / P</label>
     <label class="menu-check"><input type="checkbox" id="optCurrent" checked> Анимация тока</label>
-    <label class="menu-check"><input type="checkbox" id="optVoltage" checked> Цвет по напряжению</label>
+    <label class="menu-check"><input type="checkbox" id="optVoltage"> Окрашивать провода по напряжению</label>
     <label class="menu-check"><input type="checkbox" id="optGrid" checked> Сетка</label>
+    <label class="menu-check"><input type="checkbox" id="optSound" checked> Звук зуммера</label>
     <hr>
     <label class="menu-range">Скорость <span id="speedVal">1×</span>
       <input type="range" id="optSpeed" min="-2" max="0.7" step="0.05" value="0">
@@ -175,6 +172,21 @@
   </div>
 
   <input type="file" id="fileInput" accept="application/json,.json" hidden>
+
+  <!-- ========================= Примеры схем ======================== -->
+  <div class="modal" id="exampleModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Готовые схемы</h2>
+        <button class="icon-btn" id="exampleClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted">Выберите схему — она соберётся на столе и сразу заработает.
+        Меняйте номиналы и смотрите, что изменится.</p>
+        <div class="ex-list" id="exampleList"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- ========================== Справка ============================ -->
   <div class="modal" id="helpModal" hidden>

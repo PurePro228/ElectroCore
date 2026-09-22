@@ -945,6 +945,14 @@
     return { is: Math.max(c.props.Is, 1e-20), nf: U.clamp(c.props.nf, 1, 4), vz: vz || 0 };
   }
 
+  /* Доступ к модели перехода для составных приборов (мост, сборки). */
+  EC.junction = {
+    stamp: stampJunction,
+    current: junctionCurrent,
+    eval: junctionEval,
+    opts: diodeOpts
+  };
+
   /* --------------------------- диоды --------------------------------- */
 
   function drawDiodeBody(g, c, bodyColor, barColor) {
@@ -1425,6 +1433,7 @@
       { key: 'Rin', label: 'Входное сопр.', unit: 'Ω', def: 1e7, min: 1 }
     ],
     measure: 'p',
+    power: function (c) { return c.reading || 0; },
     stamp: function (c, ctx) {
       ctx.mna.conductance(c.n[0], c.n[1], 1 / Math.max(c.props.Rsh, 1e-6));
       ctx.mna.conductance(c.n[2], c.n[3], 1 / Math.max(c.props.Rin, 1));
@@ -1505,5 +1514,608 @@
       g.fillStyle = '#cfe0ee';
       g.beginPath(); g.arc(0, 0, 3.4, 0, 7); g.fill();
     }
+  });
+})(window);
+
+/* ElectroCore — расширение библиотеки: датчики, силовые и логические элементы. */
+(function (global) {
+  'use strict';
+  var EC = global.EC, U = EC.util, SOL = EC.solver;
+  var GRID = EC.GRID, define = EC.define, defs = EC.defs;
+  var gfx = EC.gfx, roundRect = gfx.roundRect, lead = gfx.lead, leadsH = gfx.leadsH, label = gfx.label, lcd = gfx.lcd;
+
+  /* ================================================================== */
+  /*  Датчики: сопротивление зависит от внешнего воздействия             */
+  /* ================================================================== */
+
+  /** Сопротивление термистора по уравнению Стейнхарта–Харта (В-параметр). */
+  function ntcR(c) {
+    var T = (c.props.t || 25) + 273.15;
+    var T0 = 298.15;
+    return Math.max(c.props.R25 * Math.exp(c.props.B * (1 / T - 1 / T0)), 0.01);
+  }
+
+  define({
+    key: 'thermistor', name: 'Термистор', cat: 'passive',
+    tip: 'Сопротивление падает при нагреве: R = R₂₅·exp(B·(1/T − 1/298))',
+    pins: [{ x: -2, y: 0 }, { x: 2, y: 0 }],
+    props: [
+      { key: 'R25', label: 'Сопр. при 25 °C', unit: 'Ω', def: 10000, min: 1 },
+      { key: 'B', label: 'Коэффициент B', unit: 'К', def: 3950, min: 100 },
+      {
+        key: 't', label: 'Температура', unit: '°C', def: 25, min: -20, max: 150,
+        type: 'range', step: 1, display: function (v) { return Math.round(v) + ' °C'; }
+      }
+    ],
+    stamp: function (c, ctx) { ctx.mna.conductance(c.n[0], c.n[1], 1 / ntcR(c)); },
+    post: function (c, ctx) {
+      var R = ntcR(c);
+      c.v = ctx.nv(c.n[0]) - ctx.nv(c.n[1]);
+      c.i = c.v / R;
+      c.R = R;
+    },
+    draw: function (g, c) {
+      leadsH(g, GRID * 1.3);
+      var w = GRID * 2.6, h = GRID * 0.95;
+      g.fillStyle = 'rgba(60,78,96,.95)';
+      roundRect(g, -w / 2, -h / 2, w, h, h * 0.4); g.fill();
+      g.strokeStyle = '#d7e2ec'; g.lineWidth = 1.4; g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(-w * 0.42, h * 0.55); g.lineTo(w * 0.2, h * 0.55); g.lineTo(w * 0.42, -h * 0.55);
+      g.stroke();
+      g.save();
+      g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.fillStyle = '#ffb36b'; g.font = '700 8px sans-serif'; g.textAlign = 'center';
+      g.fillText('t°', 0, 3);
+      g.restore();
+      label(g, c, [(c.name || '') + ' ' + U.fmtUnit(ntcR(c), 'Ω'), Math.round(c.props.t) + ' °C']);
+    }
+  });
+
+  /** Сопротивление фоторезистора: R = R₁₀·(10/E)^γ. */
+  function ldrLux(c) { return 0.1 * Math.pow(10, 4 * U.clamp(c.props.light, 0, 1)); }
+  function ldrR(c) {
+    return Math.max(c.props.R10 * Math.pow(10 / ldrLux(c), c.props.gamma), 1);
+  }
+
+  define({
+    key: 'photoresistor', name: 'Фоторезистор', cat: 'passive',
+    tip: 'Чем ярче свет, тем меньше сопротивление',
+    pins: [{ x: -2, y: 0 }, { x: 2, y: 0 }],
+    props: [
+      { key: 'R10', label: 'Сопр. при 10 лк', unit: 'Ω', def: 20000, min: 1 },
+      { key: 'gamma', label: 'Показатель γ', unit: '', def: 0.7, min: 0.1, max: 1.5 },
+      {
+        key: 'light', label: 'Освещённость', unit: '', def: 0.5, min: 0, max: 1,
+        type: 'range', step: 0.01,
+        display: function (v) { return U.fmtSI(0.1 * Math.pow(10, 4 * v), 3) + ' лк'; }
+      }
+    ],
+    stamp: function (c, ctx) { ctx.mna.conductance(c.n[0], c.n[1], 1 / ldrR(c)); },
+    post: function (c, ctx) {
+      var R = ldrR(c);
+      c.v = ctx.nv(c.n[0]) - ctx.nv(c.n[1]);
+      c.i = c.v / R;
+      c.R = R;
+    },
+    draw: function (g, c) {
+      leadsH(g, GRID * 1.1);
+      var r = GRID * 1.0;
+      g.fillStyle = 'rgba(210,190,120,.9)';
+      g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(60,70,50,.7)'; g.lineWidth = 1.2; g.stroke();
+      g.strokeStyle = '#3d4a2f'; g.lineWidth = 1.6; g.lineCap = 'round';
+      g.beginPath();
+      for (var i = -1; i <= 1; i++) {
+        g.moveTo(-r * 0.6, i * r * 0.36);
+        g.lineTo(r * 0.6, i * r * 0.36);
+      }
+      g.stroke();
+      // лучики
+      var br = U.clamp(c.props.light, 0, 1);
+      g.strokeStyle = 'rgba(255,215,120,' + (0.3 + 0.6 * br) + ')';
+      g.lineWidth = 1.4;
+      for (i = 0; i < 3; i++) {
+        var a = -Math.PI * 0.8 + i * 0.3;
+        g.beginPath();
+        g.moveTo(Math.cos(a) * r * 1.25, Math.sin(a) * r * 1.25);
+        g.lineTo(Math.cos(a) * r * 1.9, Math.sin(a) * r * 1.9);
+        g.stroke();
+      }
+      label(g, c, [(c.name || '') + ' ' + U.fmtUnit(ldrR(c), 'Ω'), U.fmtSI(ldrLux(c), 3) + ' лк'], GRID * 1.7);
+    }
+  });
+
+  /* ================================================================== */
+  /*  Трансформатор                                                      */
+  /* ================================================================== */
+
+  define({
+    key: 'transformer', name: 'Трансформатор', cat: 'passive',
+    tip: 'Две связанные катушки: напряжение делится в отношении витков',
+    pins: [
+      { x: -3, y: -2, name: 'I+' }, { x: -3, y: 2, name: 'I−' },
+      { x: 3, y: -2, name: 'II+' }, { x: 3, y: 2, name: 'II−' }
+    ],
+    props: [
+      { key: 'L1', label: 'Индуктивность I', unit: 'Гн', def: 1, min: 1e-9 },
+      { key: 'ratio', label: 'Отношение витков', unit: '', def: 2, min: 0.01 },
+      { key: 'k', label: 'Связь', unit: '', def: 0.98, min: 0.01, max: 0.999, type: 'range', step: 0.005 },
+      { key: 'R1', label: 'Сопр. обмотки I', unit: 'Ω', def: 1, min: 0.001 },
+      { key: 'R2', label: 'Сопр. обмотки II', unit: 'Ω', def: 0.5, min: 0.001 }
+    ],
+    branches: 2, internals: 2,
+    init: function (c) { c.state = { i1: 0, i2: 0, v1: 0, v2: 0 }; },
+    stamp: function (c, ctx) {
+      var L1 = Math.max(c.props.L1, 1e-9);
+      var L2 = Math.max(L1 / Math.pow(Math.max(c.props.ratio, 0.01), 2), 1e-12);
+      var M = U.clamp(c.props.k, 0, 0.999) * Math.sqrt(L1 * L2);
+      var kk = (ctx.method === 'be' ? 1 : 2) / ctx.dt;
+      var a11 = kk * L1, a12 = kk * M, a22 = kk * L2;
+      var st = c.state;
+      var r1 = -(a11 * st.i1 + a12 * st.i2) - (ctx.method === 'be' ? 0 : st.v1);
+      var r2 = -(a12 * st.i1 + a22 * st.i2) - (ctx.method === 'be' ? 0 : st.v2);
+      var m = ctx.mna;
+      var br1 = c.br, br2 = c.br + 1;
+      var p0 = c.n[0], p1 = c.ni[0], s0 = c.n[2], s1 = c.ni[1];
+
+      // уравнения ветвей: U = L·di/dt с взаимной индуктивностью
+      m.addA(br1, p0, 1); m.addA(br1, p1, -1);
+      m.addA(br1, br1, -a11); m.addA(br1, br2, -a12);
+      m.addB(br1, r1);
+      m.addA(br2, s0, 1); m.addA(br2, s1, -1);
+      m.addA(br2, br1, -a12); m.addA(br2, br2, -a22);
+      m.addB(br2, r2);
+      // токи ветвей в уравнениях узлов
+      m.addA(p0, br1, 1); m.addA(p1, br1, -1);
+      m.addA(s0, br2, 1); m.addA(s1, br2, -1);
+      // активное сопротивление обмоток
+      m.conductance(c.ni[0], c.n[1], 1 / Math.max(c.props.R1, 1e-3));
+      m.conductance(c.ni[1], c.n[3], 1 / Math.max(c.props.R2, 1e-3));
+      c._a = [a11, a12, a22];
+    },
+    post: function (c, ctx) {
+      var st = c.state;
+      st.i1 = ctx.x[c.br];
+      st.i2 = ctx.x[c.br + 1];
+      st.v1 = ctx.nv(c.n[0]) - ctx.nv(c.ni[0]);
+      st.v2 = ctx.nv(c.n[2]) - ctx.nv(c.ni[1]);
+      c.v = ctx.nv(c.n[0]) - ctx.nv(c.n[1]);
+      c.v2 = ctx.nv(c.n[2]) - ctx.nv(c.n[3]);
+      c.i = st.i1;
+      c.pinI = [st.i1, -st.i1, st.i2, -st.i2];
+    },
+    draw: function (g, c) {
+      lead(g, -3 * GRID, -2 * GRID, -GRID * 0.9, -2 * GRID);
+      lead(g, -3 * GRID, 2 * GRID, -GRID * 0.9, 2 * GRID);
+      lead(g, 3 * GRID, -2 * GRID, GRID * 0.9, -2 * GRID);
+      lead(g, 3 * GRID, 2 * GRID, GRID * 0.9, 2 * GRID);
+      g.strokeStyle = '#d89b4a'; g.lineWidth = 2.4; g.lineCap = 'round';
+      for (var s = -1; s <= 1; s += 2) {
+        g.beginPath();
+        for (var i = 0; i < 4; i++) {
+          g.arc(s * GRID * 0.9, -GRID * 1.5 + i * GRID, GRID * 0.5, -Math.PI / 2, Math.PI / 2, s < 0);
+        }
+        g.stroke();
+      }
+      g.strokeStyle = '#9fb0bd'; g.lineWidth = 1.6;
+      for (i = -1; i <= 1; i += 2) {
+        g.beginPath();
+        g.moveTo(i * GRID * 0.2, -GRID * 2); g.lineTo(i * GRID * 0.2, GRID * 2);
+        g.stroke();
+      }
+      label(g, c, [(c.name || '') + '  ' + U.fmtSI(c.props.ratio, 3) + ':1'], GRID * 2.6);
+    }
+  });
+
+  /* ================================================================== */
+  /*  Полупроводники: Шоттки, мост, стабилизатор                        */
+  /* ================================================================== */
+
+  define({
+    key: 'schottky', name: 'Диод Шоттки', cat: 'semi',
+    tip: 'Малое прямое падение (около 0,3 В) и высокое быстродействие',
+    pins: [{ x: -2, y: 0, name: 'A' }, { x: 2, y: 0, name: 'K' }],
+    props: [
+      { key: 'Is', label: 'Ток насыщения', unit: 'А', def: 1e-6, min: 1e-20 },
+      { key: 'nf', label: 'Коэф. неидеальности', unit: '', def: 1.05, min: 1, max: 3 }
+    ],
+    nonlinear: true,
+    stamp: function (c, ctx) { EC.junction.stamp(ctx, c, c.n[0], c.n[1], EC.junction.opts(c), '_vd'); },
+    post: function (c, ctx) {
+      var r = EC.junction.current(c, ctx, EC.junction.opts(c));
+      c.v = r.v; c.i = r.i;
+    },
+    draw: function (g, c) {
+      leadsH(g, GRID * 0.62);
+      var s = GRID * 0.62;
+      g.fillStyle = 'rgba(62,74,90,.92)';
+      g.beginPath();
+      g.moveTo(-s, -s * 0.95); g.lineTo(s * 0.35, 0); g.lineTo(-s, s * 0.95);
+      g.closePath(); g.fill();
+      g.strokeStyle = 'rgba(220,232,244,.85)'; g.lineWidth = 1.2; g.stroke();
+      // катодная черта с загнутыми концами
+      g.strokeStyle = '#dfe8f2'; g.lineWidth = 2; g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(s * 0.35 + 4, -s * 0.95); g.lineTo(s * 0.35, -s * 0.95);
+      g.lineTo(s * 0.35, s * 0.95); g.lineTo(s * 0.35 - 4, s * 0.95);
+      g.stroke();
+      label(g, c, [c.name || 'Шоттки']);
+    }
+  });
+
+  define({
+    key: 'bridge', name: 'Диодный мост', cat: 'semi',
+    tip: 'Четыре диода: превращает переменное напряжение в пульсирующее постоянное',
+    pins: [
+      { x: -3, y: 0, name: '~1' }, { x: 3, y: 0, name: '~2' },
+      { x: 0, y: -3, name: '+' }, { x: 0, y: 3, name: '−' }
+    ],
+    props: [
+      { key: 'Is', label: 'Ток насыщения', unit: 'А', def: 2.52e-9, min: 1e-20 },
+      { key: 'nf', label: 'Коэф. неидеальности', unit: '', def: 1.752, min: 1, max: 4 }
+    ],
+    nonlinear: true,
+    stamp: function (c, ctx) {
+      var o = EC.junction.opts(c);
+      EC.junction.stamp(ctx, c, c.n[0], c.n[2], o, '_v1');   // ~1 → +
+      EC.junction.stamp(ctx, c, c.n[1], c.n[2], o, '_v2');   // ~2 → +
+      EC.junction.stamp(ctx, c, c.n[3], c.n[0], o, '_v3');   // − → ~1
+      EC.junction.stamp(ctx, c, c.n[3], c.n[1], o, '_v4');   // − → ~2
+    },
+    post: function (c, ctx) {
+      var o = EC.junction.opts(c), J = EC.junction;
+      var d1 = J.eval(ctx, ctx.nv(c.n[0]) - ctx.nv(c.n[2]), o).i;   // ~1 → +
+      var d2 = J.eval(ctx, ctx.nv(c.n[1]) - ctx.nv(c.n[2]), o).i;   // ~2 → +
+      var d3 = J.eval(ctx, ctx.nv(c.n[3]) - ctx.nv(c.n[0]), o).i;   // − → ~1
+      var d4 = J.eval(ctx, ctx.nv(c.n[3]) - ctx.nv(c.n[1]), o).i;   // − → ~2
+      c.v = ctx.nv(c.n[2]) - ctx.nv(c.n[3]);
+      c.i = d1 + d2;
+      c.pinI = [d1 - d3, d2 - d4, -(d1 + d2), d3 + d4];
+      c.pinIcustom = true;
+    },
+    draw: function (g, c) {
+      lead(g, -3 * GRID, 0, -GRID * 1.3, 0);
+      lead(g, 3 * GRID, 0, GRID * 1.3, 0);
+      lead(g, 0, -3 * GRID, 0, -GRID * 1.3);
+      lead(g, 0, 3 * GRID, 0, GRID * 1.3);
+      g.fillStyle = 'rgba(40,50,64,.92)';
+      roundRect(g, -GRID * 1.3, -GRID * 1.3, GRID * 2.6, GRID * 2.6, 4); g.fill();
+      g.strokeStyle = 'rgba(170,190,210,.7)'; g.lineWidth = 1.1; g.stroke();
+      g.save();
+      g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.fillStyle = '#e6eef6'; g.font = '700 9px sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('+', 0, -GRID * 0.75);
+      g.fillText('−', 0, GRID * 0.75);
+      g.fillText('~', -GRID * 0.8, 0);
+      g.fillText('~', GRID * 0.8, 0);
+      g.restore();
+      label(g, c, [c.name || 'Мост'], GRID * 2.6);
+    }
+  });
+
+  define({
+    key: 'regulator', name: 'Стабилизатор', cat: 'semi',
+    tip: 'Держит на выходе заданное напряжение, пока на входе хватает запаса',
+    pins: [{ x: -2, y: 0, name: 'вх' }, { x: 0, y: 2, name: 'общ' }, { x: 2, y: 0, name: 'вых' }],
+    props: [
+      { key: 'Vout', label: 'Выходное U', unit: 'В', def: 5 },
+      { key: 'drop', label: 'Запас по входу', unit: 'В', def: 2, min: 0 },
+      { key: 'Rout', label: 'Выходное сопр.', unit: 'Ω', def: 0.05, min: 0.001 }
+    ],
+    branches: 1, internals: 1, nonlinear: true,
+    power: function (c) { return (c.vin - c.v) * Math.abs(c.i || 0); },
+    stamp: function (c, ctx) {
+      var vin = ctx.nv(c.n[0]) - ctx.nv(c.n[1]);
+      var target = Math.min(c.props.Vout, vin - c.props.drop);
+      if (!(target > 0)) target = 0;
+      if (c._tgt !== undefined && Math.abs(target - c._tgt) > 0.02) ctx.forceIterate();
+      c._tgt = target;
+      var m = ctx.mna, br = c.br, out = c.ni[0];
+      // уравнение ветви: U(вых) − U(общ) = target
+      m.addA(br, out, 1); m.addA(br, c.n[1], -1);
+      m.addB(br, target);
+      // ток ветви берётся со входа, а не с общего вывода
+      m.addA(out, br, 1); m.addA(c.n[0], br, -1);
+      m.conductance(out, c.n[2], 1 / Math.max(c.props.Rout, 1e-3));
+    },
+    post: function (c, ctx) {
+      c.vin = ctx.nv(c.n[0]) - ctx.nv(c.n[1]);
+      c.v = ctx.nv(c.n[2]) - ctx.nv(c.n[1]);
+      c.i = -ctx.x[c.br];
+      c.pinI = [c.i, 0, -c.i];
+      c.warn = (c.vin < c.props.Vout + c.props.drop - 0.05 && Math.abs(c.i) > 1e-6)
+        ? 'Мало напряжения на входе — стабилизация нарушена' : null;
+    },
+    draw: function (g, c) {
+      lead(g, -2 * GRID, 0, -GRID * 1.1, 0);
+      lead(g, 2 * GRID, 0, GRID * 1.1, 0);
+      lead(g, 0, 2 * GRID, 0, GRID * 0.9);
+      g.fillStyle = 'rgba(38,46,58,.95)';
+      roundRect(g, -GRID * 1.1, -GRID * 0.9, GRID * 2.2, GRID * 1.8, 3); g.fill();
+      g.fillStyle = 'rgba(190,200,212,.9)';
+      roundRect(g, -GRID * 1.1, -GRID * 0.9, GRID * 2.2, GRID * 0.5, 3); g.fill();
+      g.save();
+      g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.fillStyle = '#dfe8f2'; g.font = '600 7px ui-monospace, Menlo, monospace';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(U.fmtSI(c.props.Vout, 2) + 'В', 0, GRID * 0.25);
+      g.restore();
+      label(g, c, [(c.name || '') + ' ' + U.fmtUnit(c.props.Vout, 'В')], GRID * 1.9);
+    }
+  });
+})(window);
+
+/* ElectroCore — исполнительные устройства и логика. */
+(function (global) {
+  'use strict';
+  var EC = global.EC, U = EC.util;
+  var GRID = EC.GRID, define = EC.define;
+  var gfx = EC.gfx, roundRect = gfx.roundRect, lead = gfx.lead, leadsH = gfx.leadsH, label = gfx.label;
+
+  /* ================================================================== */
+  /*  Исполнительные устройства                                          */
+  /* ================================================================== */
+
+  define({
+    key: 'motor', name: 'Двигатель', cat: 'actuator', catName: 'Исполнительные',
+    tip: 'Ток создаёт момент, вращение наводит противо-ЭДС: U = I·R + Ke·ω',
+    pins: [{ x: -2, y: 0, name: '+' }, { x: 2, y: 0, name: '−' }],
+    props: [
+      { key: 'R', label: 'Сопр. обмотки', unit: 'Ω', def: 8, min: 0.01 },
+      { key: 'Ke', label: 'Постоянная', unit: 'В·с/рад', def: 0.02, min: 1e-6 },
+      { key: 'J', label: 'Момент инерции', unit: 'кг·м²', def: 2e-5, min: 1e-9 },
+      { key: 'b', label: 'Трение', unit: 'Н·м·с', def: 2e-5, min: 0 },
+      { key: 'load', label: 'Момент нагрузки', unit: 'Н·м', def: 0, min: 0 }
+    ],
+    branches: 1, internals: 1,
+    init: function (c) { c.state = { w: 0, angle: 0 }; },
+    stamp: function (c, ctx) {
+      ctx.mna.conductance(c.n[0], c.ni[0], 1 / Math.max(c.props.R, 0.01));
+      ctx.mna.voltageSource(c.ni[0], c.n[1], c.br, c.props.Ke * c.state.w);
+    },
+    post: function (c, ctx) {
+      c.i = ctx.x[c.br];
+      c.v = ctx.nv(c.n[0]) - ctx.nv(c.n[1]);
+      var Kt = c.props.Ke;                       // в СИ момент и ЭДС связаны одной постоянной
+      var torque = Kt * c.i;
+      var st = c.state;
+      var dw = (torque - c.props.b * st.w - Math.sign(st.w) * c.props.load) / Math.max(c.props.J, 1e-9);
+      st.w += dw * ctx.dt;
+      if (Math.abs(st.w) < 1e-6 && Math.abs(torque) < c.props.load) st.w = 0;
+      st.angle = (st.angle + st.w * ctx.dt) % (Math.PI * 2);
+      c.rpm = st.w * 60 / (2 * Math.PI);
+      c.torque = torque;
+    },
+    draw: function (g, c) {
+      leadsH(g, GRID * 1.1);
+      var r = GRID * 1.1;
+      g.fillStyle = 'rgba(52,64,80,.95)';
+      g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(180,198,215,.8)'; g.lineWidth = 1.4;
+      g.beginPath(); g.arc(0, 0, r, 0, 7); g.stroke();
+      g.save();
+      g.rotate((c.state ? c.state.angle : 0));
+      g.strokeStyle = '#e4ecf4'; g.lineWidth = 2; g.lineCap = 'round';
+      for (var i = 0; i < 3; i++) {
+        var a = i * Math.PI * 2 / 3;
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.lineTo(Math.cos(a) * r * 0.65, Math.sin(a) * r * 0.65);
+        g.stroke();
+      }
+      g.restore();
+      g.save();
+      g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.fillStyle = '#8fd4ff'; g.font = '700 8px sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('M', 0, -r * 0.55);
+      g.restore();
+      label(g, c, [(c.name || '') + '  ' + Math.round(c.rpm || 0) + ' об/мин'], GRID * 1.75);
+    }
+  });
+
+  define({
+    key: 'buzzer', name: 'Зуммер', cat: 'actuator',
+    tip: 'Пищит, когда через него идёт ток',
+    pins: [{ x: -2, y: 0, name: '+' }, { x: 2, y: 0, name: '−' }],
+    props: [
+      { key: 'R', label: 'Сопротивление', unit: 'Ω', def: 120, min: 1 },
+      { key: 'freq', label: 'Частота звука', unit: 'Гц', def: 2400, min: 50, max: 8000 },
+      { key: 'In', label: 'Номин. ток', unit: 'А', def: 0.02, min: 1e-4 }
+    ],
+    stamp: function (c, ctx) { ctx.mna.conductance(c.n[0], c.n[1], 1 / Math.max(c.props.R, 1)); },
+    post: function (c, ctx) {
+      c.v = ctx.nv(c.n[0]) - ctx.nv(c.n[1]);
+      c.i = c.v / Math.max(c.props.R, 1);
+      c.loud = U.clamp(Math.abs(c.i) / Math.max(c.props.In, 1e-4), 0, 1.5);
+    },
+    draw: function (g, c) {
+      leadsH(g, GRID * 1.0);
+      var r = GRID * 1.0;
+      g.fillStyle = 'rgba(28,32,40,.96)';
+      g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(150,165,180,.7)'; g.lineWidth = 1.2;
+      g.beginPath(); g.arc(0, 0, r, 0, 7); g.stroke();
+      g.fillStyle = 'rgba(120,132,148,.9)';
+      g.beginPath(); g.arc(0, 0, r * 0.22, 0, 7); g.fill();
+      var loud = c.loud || 0;
+      if (loud > 0.05) {
+        g.strokeStyle = 'rgba(255,215,120,' + U.clamp(loud, 0.2, 0.9) + ')';
+        g.lineWidth = 1.5;
+        for (var i = 1; i <= 3; i++) {
+          g.beginPath();
+          g.arc(0, 0, r + i * 5, -Math.PI * 0.28, Math.PI * 0.28);
+          g.stroke();
+        }
+      }
+      label(g, c, [(c.name || '') + (loud > 0.05 ? '  звучит' : '')], GRID * 1.6);
+    }
+  });
+
+  /* ================================================================== */
+  /*  Логические элементы                                                */
+  /* ================================================================== */
+
+  /**
+   * Логический элемент: входы с высоким сопротивлением и порогом,
+   * выход — источник напряжения питания или нуля через выходное сопротивление.
+   */
+  function gate(key, name, inputs, fn, symbol) {
+    return {
+      key: key, name: name, cat: 'logic', catName: 'Логика',
+      tip: 'Порог переключения — половина напряжения питания',
+      pins: inputs === 1
+        ? [{ x: -2, y: 0, name: 'вх' }, { x: 2, y: 0, name: 'вых' }]
+        : [{ x: -2, y: -1, name: 'вх1' }, { x: -2, y: 1, name: 'вх2' }, { x: 2, y: 0, name: 'вых' }],
+      props: [
+        { key: 'Vcc', label: 'Напряжение питания', unit: 'В', def: 5, min: 0.5 },
+        { key: 'Rout', label: 'Выходное сопр.', unit: 'Ω', def: 30, min: 0.1 }
+      ],
+      branches: 1, internals: 1, nonlinear: true, inputs: inputs, symbol: symbol,
+      init: function (c) { c.state = { in: [false, false], out: false }; },
+      stamp: function (c, ctx) {
+        var vcc = Math.max(c.props.Vcc, 0.5);
+        var hi = vcc * 0.6, lo = vcc * 0.4;
+        var vals = [];
+        for (var i = 0; i < inputs; i++) {
+          ctx.mna.conductance(c.n[i], -1, 1e-6);   // подтяжка входа к нулю
+          var v = ctx.nv(c.n[i]);
+          var prev = c.state.in[i];
+          vals[i] = v > hi ? true : (v < lo ? false : prev);
+        }
+        var out = fn(vals);
+        if (c._iterOut !== undefined && c._iterOut !== out) ctx.forceIterate();
+        c._iterOut = out;
+        c._vals = vals;
+        var outPin = c.n[inputs], mid = c.ni[0];
+        ctx.mna.voltageSource(mid, -1, c.br, out ? vcc : 0);
+        ctx.mna.conductance(mid, outPin, 1 / Math.max(c.props.Rout, 0.1));
+      },
+      post: function (c, ctx) {
+        c.state.in = c._vals || [false, false];
+        c.state.out = c._iterOut;
+        c._iterOut = undefined;
+        c.v = ctx.nv(c.n[inputs]);
+        c.i = -ctx.x[c.br];
+        c.pinI = inputs === 1 ? [0, c.i] : [0, 0, c.i];
+        c.level = c.state.out ? '1' : '0';
+      },
+      draw: function (g, c) {
+        var w = GRID * 1.6, h = GRID * 1.9;
+        if (inputs === 1) {
+          lead(g, -2 * GRID, 0, -w / 2, 0);
+        } else {
+          lead(g, -2 * GRID, -GRID, -w / 2, -GRID);
+          lead(g, -2 * GRID, GRID, -w / 2, GRID);
+        }
+        lead(g, 2 * GRID, 0, w / 2, 0);
+        g.fillStyle = c.state && c.state.out ? 'rgba(52,86,74,.95)' : 'rgba(44,54,68,.95)';
+        roundRect(g, -w / 2, -h / 2, w, h, 3); g.fill();
+        g.strokeStyle = c.state && c.state.out ? 'rgba(125,255,208,.8)' : 'rgba(170,190,210,.7)';
+        g.lineWidth = 1.3;
+        roundRect(g, -w / 2, -h / 2, w, h, 3); g.stroke();
+        g.save();
+        g.rotate(-(c.rot || 0) * Math.PI / 2);
+        g.fillStyle = '#e6eef6';
+        g.font = '700 11px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(symbol, 0, 0);
+        g.restore();
+        label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 1.7);
+      }
+    };
+  }
+
+  define(gate('not_gate', 'Элемент НЕ', 1, function (v) { return !v[0]; }, '1'));
+  define(gate('and_gate', 'Элемент И', 2, function (v) { return v[0] && v[1]; }, '&'));
+  define(gate('or_gate', 'Элемент ИЛИ', 2, function (v) { return v[0] || v[1]; }, '≥1'));
+
+  /* ================================================================== */
+  /*  Таймер NE555                                                       */
+  /* ================================================================== */
+
+  define({
+    key: 'ne555', name: 'Таймер 555', cat: 'logic',
+    tip: 'Выход переключается порогами ⅓ и ⅔ питания. Классика мигалок и генераторов.',
+    pins: [
+      { x: -3, y: -2, name: 'Vcc' }, { x: -3, y: 2, name: 'GND' },
+      { x: -3, y: 0, name: 'ЗАП' }, { x: 3, y: -2, name: 'ПОР' },
+      { x: 3, y: 0, name: 'РАЗР' }, { x: 3, y: 2, name: 'ВЫХ' }
+    ],
+    props: [
+      { key: 'Rout', label: 'Выходное сопр.', unit: 'Ω', def: 10, min: 0.1 },
+      { key: 'Rdis', label: 'Сопр. разряда', unit: 'Ω', def: 20, min: 0.1 }
+    ],
+    init: function (c) { c.state = { q: false }; },
+    stamp: function (c, ctx) {
+      var m = ctx.mna;
+      var VCC = c.n[0], GND = c.n[1], DIS = c.n[4], OUT = c.n[5];
+      m.conductance(VCC, GND, 1 / 15000);        // внутренний делитель 3×5 кΩ
+      var q = c.state.q;
+      m.conductance(OUT, q ? VCC : GND, 1 / Math.max(c.props.Rout, 0.1));
+      m.conductance(OUT, q ? GND : VCC, 1e-11);
+      m.conductance(DIS, GND, q ? 1e-11 : 1 / Math.max(c.props.Rdis, 0.1));
+    },
+    post: function (c, ctx) {
+      var vg = ctx.nv(c.n[1]);
+      var vcc = ctx.nv(c.n[0]) - vg;
+      var vTrig = ctx.nv(c.n[2]) - vg;
+      var vThr = ctx.nv(c.n[3]) - vg;
+      var q = c.state.q;
+      if (vcc > 0.5) {
+        if (vThr > vcc * 2 / 3) q = false;       // порог сбрасывает
+        if (vTrig < vcc / 3) q = true;           // запуск имеет приоритет
+      } else q = false;
+      c.state.q = q;
+
+      var Rout = Math.max(c.props.Rout, 0.1), Rdis = Math.max(c.props.Rdis, 0.1);
+      var vOut = ctx.nv(c.n[5]) - vg;
+      var iOut = (vOut - (q ? vcc : 0)) / Rout;
+      var iDis = q ? 0 : (ctx.nv(c.n[4]) - vg) / Rdis;
+      var iDiv = vcc / 15000;
+      var iVcc = iDiv - (q ? iOut : 0);
+      c.pinI = [iVcc, 0, 0, 0, iDis, iOut];
+      c.pinI[1] = -(iVcc + iDis + iOut);
+      c.v = vOut;
+      c.i = -iOut;
+      c.level = q ? '1' : '0';
+    },
+    draw: function (g, c) {
+      lead(g, -3 * GRID, -2 * GRID, -GRID * 1.3, -2 * GRID);
+      lead(g, -3 * GRID, 0, -GRID * 1.3, 0);
+      lead(g, -3 * GRID, 2 * GRID, -GRID * 1.3, 2 * GRID);
+      lead(g, 3 * GRID, -2 * GRID, GRID * 1.3, -2 * GRID);
+      lead(g, 3 * GRID, 0, GRID * 1.3, 0);
+      lead(g, 3 * GRID, 2 * GRID, GRID * 1.3, 2 * GRID);
+      var w = GRID * 2.6, h = GRID * 5;
+      g.fillStyle = 'rgba(34,40,50,.96)';
+      roundRect(g, -w / 2, -h / 2, w, h, 3); g.fill();
+      g.strokeStyle = c.state && c.state.q ? 'rgba(125,255,208,.75)' : 'rgba(170,190,210,.6)';
+      g.lineWidth = 1.3;
+      roundRect(g, -w / 2, -h / 2, w, h, 3); g.stroke();
+      g.save();
+      g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.fillStyle = '#e6eef6';
+      g.font = '700 10px ui-monospace, Menlo, monospace';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('555', 0, 0);
+      g.font = '600 6px sans-serif';
+      g.fillStyle = 'rgba(200,215,230,.7)';
+      g.fillText('Vcc', -GRID * 1.9, -GRID * 2);
+      g.fillText('ЗАП', -GRID * 1.9, 0);
+      g.fillText('GND', -GRID * 1.9, GRID * 2);
+      g.fillText('ПОР', GRID * 1.9, -GRID * 2);
+      g.fillText('РАЗР', GRID * 1.95, 0);
+      g.fillText('ВЫХ', GRID * 1.9, GRID * 2);
+      g.restore();
+      label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 3.2);
+    }
+  });
+
+  /* Порядок разделов в палитре. */
+  var ORDER = ['passive', 'source', 'switch', 'semi', 'logic', 'actuator', 'meter'];
+  EC.categories.sort(function (a, b) {
+    return ORDER.indexOf(a.key) - ORDER.indexOf(b.key);
   });
 })(window);

@@ -15,7 +15,7 @@
     this.hoverComp = null;
     this.pendingWire = null;
     this.ghost = null;
-    this.options = { showValues: true, showCurrent: true, showVoltage: true, grid: true };
+    this.options = { showValues: true, showCurrent: true, showVoltage: false, grid: true };
     this.running = false;      // расчёт уже выполнялся — можно показывать величины
     this.simRunning = false;   // расчёт идёт прямо сейчас — оживляем ток
   }
@@ -192,7 +192,7 @@
       g.lineJoin = 'round'; g.lineCap = 'round';
 
       if (EC.skin === 'real') {
-        var col = this.jumperColor(volt, sel);
+        var col = this.jumperColor(w, volt, sel);
         g.strokeStyle = 'rgba(10,35,26,.35)';
         g.lineWidth = 6.4;
         this.strokePoly(g, pts, 1.6);
@@ -218,7 +218,28 @@
         this.strokePoly(g, pts, -0.9);
       }
 
+      if (sel && pts.length === 4) this.drawWireHandle(g, pts);
       if (this.options.showCurrent && this.running) this.drawCurrentFlow(g, w, pts, this.simRunning ? dtReal : 0);
+    }
+  };
+
+  /** Захват для переноса среднего участка провода на соседнюю линию. */
+  Renderer.prototype.drawWireHandle = function (g, pts) {
+    var cx = (pts[1].x + pts[2].x) / 2, cy = (pts[1].y + pts[2].y) / 2;
+    var vertical = Math.abs(pts[1].x - pts[2].x) < 0.5;
+    g.fillStyle = 'rgba(255,255,255,.92)';
+    g.strokeStyle = 'rgba(30,60,50,.55)';
+    g.lineWidth = 1;
+    EC.gfx.roundRect(g, cx - (vertical ? 4 : 9), cy - (vertical ? 9 : 4),
+      vertical ? 8 : 18, vertical ? 18 : 8, 3);
+    g.fill(); g.stroke();
+    g.strokeStyle = 'rgba(30,60,50,.6)';
+    g.lineWidth = 1.2;
+    for (var i = -1; i <= 1; i++) {
+      g.beginPath();
+      if (vertical) { g.moveTo(cx - 2.5, cy + i * 4); g.lineTo(cx + 2.5, cy + i * 4); }
+      else { g.moveTo(cx + i * 4, cy - 2.5); g.lineTo(cx + i * 4, cy + 2.5); }
+      g.stroke();
     }
   };
 
@@ -249,30 +270,32 @@
   };
 
   /**
-   * Цвет изоляции соединительного провода.
-   * Как в наборах перемычек: красный — плюс, синий — минус, чёрный — общий.
+   * Цвет изоляции соединительного провода. По умолчанию — свой цвет у каждой
+   * перемычки, как в наборе Dupont; при окраске по напряжению красный
+   * означает плюс, синий — минус, чёрный — потенциал около нуля.
    */
-  Renderer.prototype.jumperColor = function (volt, sel) {
-    if (sel) return { dark: '#1d6d86', core: '#43b8d8', hi: 'rgba(255,255,255,.5)' };
-    if (!(this.options.showVoltage && this.running)) {
-      return { dark: '#3a4550', core: '#5d6b79', hi: 'rgba(255,255,255,.22)' };
-    }
-    var t = U.clamp(volt / this.voltScale(), -1, 1);
-    if (Math.abs(t) < 0.06) return { dark: '#15191e', core: '#333b44', hi: 'rgba(255,255,255,.2)' };
-    if (t > 0) {
-      var a = 0.35 + 0.65 * t;
+  Renderer.prototype.jumperColor = function (wire, volt, sel) {
+    if (sel) return { dark: '#1d6d86', core: '#46c2e0', hi: 'rgba(255,255,255,.55)' };
+    if (this.options.showVoltage && this.running) {
+      var t = U.clamp(volt / this.voltScale(), -1, 1);
+      if (Math.abs(t) < 0.06) return { dark: '#15191e', core: '#333b44', hi: 'rgba(255,255,255,.2)' };
+      if (t > 0) {
+        var a = 0.35 + 0.65 * t;
+        return {
+          dark: 'rgb(' + Math.round(100 * a) + ',' + Math.round(22 * a) + ',' + Math.round(14 * a) + ')',
+          core: 'rgb(' + Math.round(150 + 80 * a) + ',' + Math.round(50 + 20 * a) + ',' + Math.round(38 + 10 * a) + ')',
+          hi: 'rgba(255,190,175,.45)'
+        };
+      }
+      var b = 0.35 + 0.65 * (-t);
       return {
-        dark: 'rgb(' + Math.round(100 * a) + ',' + Math.round(22 * a) + ',' + Math.round(14 * a) + ')',
-        core: 'rgb(' + Math.round(150 + 80 * a) + ',' + Math.round(50 + 20 * a) + ',' + Math.round(38 + 10 * a) + ')',
-        hi: 'rgba(255,190,175,.45)'
+        dark: 'rgb(' + Math.round(14 * b) + ',' + Math.round(34 * b) + ',' + Math.round(86 * b) + ')',
+        core: 'rgb(' + Math.round(40 + 20 * b) + ',' + Math.round(95 + 30 * b) + ',' + Math.round(170 + 60 * b) + ')',
+        hi: 'rgba(180,215,255,.45)'
       };
     }
-    var b = 0.35 + 0.65 * (-t);
-    return {
-      dark: 'rgb(' + Math.round(14 * b) + ',' + Math.round(34 * b) + ',' + Math.round(86 * b) + ')',
-      core: 'rgb(' + Math.round(40 + 20 * b) + ',' + Math.round(95 + 30 * b) + ',' + Math.round(170 + 60 * b) + ')',
-      hi: 'rgba(180,215,255,.45)'
-    };
+    var pal = EC.WIRE_COLORS;
+    return pal[(wire.color || 0) % pal.length];
   };
 
   Renderer.prototype.voltScale = function () {
@@ -487,6 +510,18 @@
     for (var i = cs.length - 1; i >= 0; i--) {
       var b = cs[i].bounds();
       if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) return cs[i];
+    }
+    return null;
+  };
+
+  /** Провод, средний участок которого находится под точкой. */
+  Renderer.prototype.wireMidAt = function (wx, wy, tol) {
+    tol = tol || 0.5;
+    var ws = this.circuit.wires;
+    for (var i = ws.length - 1; i >= 0; i--) {
+      var path = ws[i]._path || this.circuit.wirePath(ws[i]);
+      if (!path || path.length !== 4) continue;
+      if (U.distToSegment(wx, wy, path[1].x, path[1].y, path[2].x, path[2].y) < tol) return ws[i];
     }
     return null;
   };

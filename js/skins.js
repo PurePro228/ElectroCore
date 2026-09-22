@@ -919,3 +919,303 @@
     g.beginPath(); g.arc(-1.2, -1.2, 1.3, 0, 7); g.fill();
   };
 })(window);
+
+/* ElectroCore — реалистичный вид: датчики, силовые и логические элементы. */
+(function (global) {
+  'use strict';
+  var EC = global.EC, U = EC.util, GRID = EC.GRID;
+  var gfx = EC.gfx, roundRect = gfx.roundRect, label = gfx.label, grad = gfx.grad;
+  var rg = EC.realGfx, lead = rg.lead, leads = rg.leads, shadowUnder = rg.shadowUnder, silk = rg.silk, gloss = rg.gloss;
+  var real = EC.real;
+
+  real.thermistor = function (g, c) {
+    // термистор в эпоксидной капле
+    var r = GRID * 0.72;
+    lead(g, -2 * GRID, 0, -r * 0.6, 0, 2.6);
+    lead(g, r * 0.6, 0, 2 * GRID, 0, 2.6);
+    shadowUnder(g, r * 2, r * 1.5);
+    g.fillStyle = grad(g, 'ntcBody', 0, -r, 0, r, [
+      [0, '#3c4450'], [0.3, '#242a33'], [0.75, '#171c23'], [1, '#0d1116']
+    ]);
+    g.beginPath(); g.ellipse(0, 0, r, r * 0.92, 0, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 0.8; g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.2)';
+    g.beginPath(); g.ellipse(-r * 0.3, -r * 0.35, r * 0.3, r * 0.17, -0.5, 0, 7); g.fill();
+    silk(g, c, 't°', 0, r * 0.1, 7, 'rgba(255,175,110,.9)');
+    var R = c.R || c.props.R25;
+    label(g, c, [(c.name || '') + '  ' + U.fmtUnit(R, 'Ω'), Math.round(c.props.t) + ' °C']);
+  };
+
+  real.photoresistor = function (g, c) {
+    // фоторезистор: керамический диск с дорожкой из сульфида кадмия
+    var r = GRID * 0.95, br = U.clamp(c.props.light, 0, 1);
+    lead(g, -2 * GRID, 0, -r * 0.7, 0, 2.6);
+    lead(g, r * 0.7, 0, 2 * GRID, 0, 2.6);
+    shadowUnder(g, r * 2.2, r * 1.6);
+    g.fillStyle = grad(g, 'ldrBase', 0, -r, 0, r, [
+      [0, '#f0e6c8'], [0.4, '#dcc99c'], [1, '#a8936a']
+    ]);
+    g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(80,70,45,.55)'; g.lineWidth = 1; g.stroke();
+    g.strokeStyle = '#4a5a3c'; g.lineWidth = 2.1; g.lineCap = 'round';
+    g.beginPath();
+    for (var i = 0; i < 5; i++) {
+      var y = -r * 0.5 + i * r * 0.25;
+      g.moveTo(-r * 0.62, y); g.lineTo(r * 0.62, y);
+    }
+    g.stroke();
+    g.strokeStyle = '#4a5a3c'; g.lineWidth = 2.1;
+    g.beginPath();
+    g.moveTo(r * 0.62, -r * 0.5); g.lineTo(r * 0.62, -r * 0.25);
+    g.moveTo(-r * 0.62, -r * 0.25); g.lineTo(-r * 0.62, 0);
+    g.moveTo(r * 0.62, 0); g.lineTo(r * 0.62, r * 0.25);
+    g.moveTo(-r * 0.62, r * 0.25); g.lineTo(-r * 0.62, r * 0.5);
+    g.stroke();
+    // падающий свет
+    g.strokeStyle = 'rgba(255,225,140,' + (0.25 + 0.65 * br) + ')';
+    g.lineWidth = 1.6; g.lineCap = 'round';
+    for (i = 0; i < 3; i++) {
+      var a = -Math.PI * 0.82 + i * 0.26;
+      g.beginPath();
+      g.moveTo(Math.cos(a) * r * 1.2, Math.sin(a) * r * 1.2);
+      g.lineTo(Math.cos(a) * r * 1.95, Math.sin(a) * r * 1.95);
+      g.stroke();
+    }
+    if (br > 0.5) {
+      g.fillStyle = 'rgba(255,240,180,' + (0.12 * (br - 0.5) * 2) + ')';
+      g.beginPath(); g.arc(0, 0, r * 1.6, 0, 7); g.fill();
+    }
+    label(g, c, [(c.name || '') + '  ' + U.fmtUnit(c.R || 0, 'Ω')], GRID * 1.6);
+  };
+
+  real.transformer = function (g, c) {
+    // трансформатор на шихтованном сердечнике
+    var w = GRID * 2.2, h = GRID * 4.4;
+    lead(g, -3 * GRID, -2 * GRID, -w / 2 - 2, -2 * GRID);
+    lead(g, -3 * GRID, 2 * GRID, -w / 2 - 2, 2 * GRID);
+    lead(g, 3 * GRID, -2 * GRID, w / 2 + 2, -2 * GRID);
+    lead(g, 3 * GRID, 2 * GRID, w / 2 + 2, 2 * GRID);
+    shadowUnder(g, w * 1.6, h);
+    // катушки
+    for (var s = -1; s <= 1; s += 2) {
+      g.fillStyle = grad(g, 'coilBobbin', 0, -h * 0.4, 0, h * 0.4, [
+        [0, '#f0c07a'], [0.25, '#d89b4a'], [0.7, '#a8702f'], [1, '#6f4a1c']
+      ]);
+      roundRect(g, s < 0 ? -w / 2 - 6 : w / 2 - 4, -h * 0.4, 10, h * 0.8, 2);
+      g.fill();
+      g.strokeStyle = 'rgba(80,50,15,.35)'; g.lineWidth = 0.7;
+      for (var i = 0; i < 9; i++) {
+        var y = -h * 0.4 + 3 + i * (h * 0.8 - 6) / 8;
+        g.beginPath();
+        g.moveTo(s < 0 ? -w / 2 - 6 : w / 2 - 4, y);
+        g.lineTo(s < 0 ? -w / 2 + 4 : w / 2 + 6, y);
+        g.stroke();
+      }
+    }
+    // сердечник
+    g.fillStyle = grad(g, 'trCore', 0, -h / 2, 0, h / 2, [
+      [0, '#8d97a2'], [0.2, '#69737e'], [0.7, '#4c545d'], [1, '#333940']
+    ]);
+    roundRect(g, -w / 2, -h / 2, w, h, 2); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.1)'; g.lineWidth = 0.8;
+    for (i = 1; i < 5; i++) {
+      g.beginPath();
+      g.moveTo(-w / 2 + i * w / 5, -h / 2); g.lineTo(-w / 2 + i * w / 5, h / 2);
+      g.stroke();
+    }
+    g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 1;
+    roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
+    label(g, c, [(c.name || '') + '  ' + U.fmtSI(c.props.ratio, 3) + ':1'], GRID * 2.9);
+  };
+
+  real.schottky = function (g, c) {
+    var w = GRID * 1.9, h = GRID * 0.8;
+    leads(g, w / 2, 2.6);
+    shadowUnder(g, w, h);
+    g.fillStyle = grad(g, 'schBody', 0, -h / 2, 0, h / 2, [
+      [0, '#5b6472'], [0.22, '#3a4150'], [0.7, '#262b35'], [1, '#14171d']
+    ]);
+    roundRect(g, -w / 2, -h / 2, w, h, h * 0.3); g.fill();
+    g.fillStyle = '#c9d4de';
+    g.fillRect(w / 2 - w * 0.22, -h / 2, w * 0.13, h);
+    gloss(g, w, h, 0.2);
+    g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 0.8;
+    roundRect(g, -w / 2, -h / 2, w, h, h * 0.3); g.stroke();
+    silk(g, c, '1N5819', -w * 0.12, 0, 5, 'rgba(225,235,245,.7)');
+    label(g, c, [c.name || 'Шоттки'], GRID * 1.1);
+  };
+
+  real.bridge = function (g, c) {
+    // мост в корпусе KBL
+    var s = GRID * 1.5;
+    lead(g, -3 * GRID, 0, -s, 0, 2.8);
+    lead(g, 3 * GRID, 0, s, 0, 2.8);
+    lead(g, 0, -3 * GRID, 0, -s, 2.8);
+    lead(g, 0, 3 * GRID, 0, s, 2.8);
+    shadowUnder(g, s * 2, s * 2);
+    g.fillStyle = grad(g, 'bridgeBody', 0, -s, 0, s, [
+      [0, '#3f4855'], [0.2, '#262c36'], [0.72, '#191d25'], [1, '#0e1116']
+    ]);
+    roundRect(g, -s, -s, s * 2, s * 2, 4); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.07)';
+    roundRect(g, -s + 2, -s + 2, s * 2 - 4, s * 0.45, 2); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 1;
+    roundRect(g, -s, -s, s * 2, s * 2, 4); g.stroke();
+    g.save();
+    g.rotate(-(c.rot || 0) * Math.PI / 2);
+    g.font = '700 9px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#ff9b7a'; g.fillText('+', 0, -s * 0.62);
+    g.fillStyle = '#8fb6ff'; g.fillText('−', 0, s * 0.62);
+    g.fillStyle = 'rgba(225,235,245,.8)';
+    g.fillText('~', -s * 0.62, 0);
+    g.fillText('~', s * 0.62, 0);
+    g.restore();
+    label(g, c, [c.name || 'Мост'], GRID * 2.5);
+  };
+
+  real.regulator = function (g, c) {
+    // стабилизатор в корпусе TO-220
+    var w = GRID * 1.9, h = GRID * 2.0;
+    lead(g, -2 * GRID, 0, -w * 0.3, h * 0.42, 2.6);
+    lead(g, 0, 2 * GRID, 0, h * 0.42, 2.6);
+    lead(g, 2 * GRID, 0, w * 0.3, h * 0.42, 2.6);
+    shadowUnder(g, w, h);
+    g.fillStyle = grad(g, 'to220tab', 0, -h / 2, 0, -h * 0.1, [
+      [0, '#e6ecf1'], [0.5, '#b4bec7'], [1, '#7d868f']
+    ]);
+    roundRect(g, -w / 2, -h / 2, w, h * 0.4, 2); g.fill();
+    g.fillStyle = 'rgba(40,50,60,.75)';
+    g.beginPath(); g.arc(0, -h * 0.35, w * 0.13, 0, 7); g.fill();
+    g.fillStyle = grad(g, 'to220body', 0, -h * 0.1, 0, h / 2, [
+      [0, '#3a4049'], [0.25, '#23282f'], [1, '#12151a']
+    ]);
+    roundRect(g, -w / 2, -h * 0.14, w, h * 0.58, 2); g.fill();
+    silk(g, c, '78' + (c.props.Vout >= 10 ? Math.round(c.props.Vout) : '0' + Math.round(c.props.Vout)),
+      0, h * 0.14, 6, 'rgba(230,238,246,.75)');
+    if (c.warn) {
+      g.strokeStyle = 'rgba(255,140,90,.8)'; g.lineWidth = 1.4;
+      roundRect(g, -w / 2, -h / 2, w, h * 0.98, 2); g.stroke();
+    }
+    label(g, c, [(c.name || '') + '  ' + U.fmtUnit(c.props.Vout, 'В')], GRID * 1.9);
+  };
+
+  real.motor = function (g, c) {
+    // мотор в круглом корпусе с валом
+    var r = GRID * 1.15;
+    lead(g, -2 * GRID, 0, -r * 0.85, 0, 2.8);
+    lead(g, 2 * GRID, 0, r * 0.85, 0, 2.8);
+    shadowUnder(g, r * 2.2, r * 1.8);
+    g.fillStyle = grad(g, 'motorCan', 0, -r, 0, r, [
+      [0, '#e8eef3'], [0.18, '#c3ccd5'], [0.62, '#8f99a3'], [1, '#5f686f']
+    ]);
+    g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(50,62,74,.6)'; g.lineWidth = 1.2;
+    g.beginPath(); g.arc(0, 0, r, 0, 7); g.stroke();
+    g.strokeStyle = 'rgba(70,82,94,.35)'; g.lineWidth = 1;
+    g.beginPath(); g.arc(0, 0, r * 0.78, 0, 7); g.stroke();
+    // вал с меткой, вращается вместе с ротором
+    g.save();
+    g.rotate((c.state ? c.state.angle : 0));
+    g.fillStyle = grad(g, 'motorHub', 0, -r * 0.4, 0, r * 0.4, [
+      [0, '#6c7683'], [0.5, '#434c57'], [1, '#262c34']
+    ]);
+    g.beginPath(); g.arc(0, 0, r * 0.38, 0, 7); g.fill();
+    g.strokeStyle = '#f2f6fa'; g.lineWidth = 2.2; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(r * 0.3, 0); g.stroke();
+    g.restore();
+    g.save();
+    g.rotate(-(c.rot || 0) * Math.PI / 2);
+    g.fillStyle = 'rgba(40,55,70,.8)';
+    g.font = '700 8px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('M', 0, r * 0.62);
+    g.restore();
+    label(g, c, [(c.name || '') + '  ' + Math.round(c.rpm || 0) + ' об/мин'], GRID * 1.75);
+  };
+
+  real.buzzer = function (g, c) {
+    // пьезоизлучатель: чёрный цилиндр с отверстием
+    var r = GRID * 1.05, loud = c.loud || 0;
+    lead(g, -2 * GRID, 0, -r * 0.8, 0, 2.6);
+    lead(g, r * 0.8, 0, 2 * GRID, 0, 2.6);
+    shadowUnder(g, r * 2.1, r * 1.6);
+    g.fillStyle = grad(g, 'buzzBody', 0, -r, 0, r, [
+      [0, '#3b434d'], [0.22, '#22272f'], [0.7, '#161a20'], [1, '#0b0e12']
+    ]);
+    g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 1;
+    g.beginPath(); g.arc(0, 0, r, 0, 7); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.09)';
+    g.beginPath(); g.ellipse(-r * 0.3, -r * 0.42, r * 0.45, r * 0.2, -0.4, 0, 7); g.fill();
+    g.fillStyle = '#05070a';
+    g.beginPath(); g.arc(0, 0, r * 0.2, 0, 7); g.fill();
+    if (loud > 0.05) {
+      g.strokeStyle = 'rgba(255,214,110,' + U.clamp(loud, 0.25, 0.9) + ')';
+      g.lineWidth = 1.6; g.lineCap = 'round';
+      for (var i = 1; i <= 3; i++) {
+        g.beginPath();
+        g.arc(0, 0, r + i * 5.5, -Math.PI * 0.26, Math.PI * 0.26);
+        g.stroke();
+      }
+    }
+    label(g, c, [(c.name || '') + (loud > 0.05 ? '  звучит' : '')], GRID * 1.6);
+  };
+
+  /** Логическая микросхема в корпусе DIP. */
+  function logicChip(g, c, symbol, inputs) {
+    var w = GRID * 1.8, h = GRID * 2.2;
+    if (inputs === 1) lead(g, -2 * GRID, 0, -w / 2, 0, 2.4);
+    else {
+      lead(g, -2 * GRID, -GRID, -w / 2, -h * 0.26, 2.4);
+      lead(g, -2 * GRID, GRID, -w / 2, h * 0.26, 2.4);
+    }
+    lead(g, 2 * GRID, 0, w / 2, 0, 2.4);
+    shadowUnder(g, w, h);
+    var on = c.state && c.state.out;
+    g.fillStyle = grad(g, 'dipBody', 0, -h / 2, 0, h / 2, [
+      [0, '#40464f'], [0.18, '#272c33'], [0.72, '#191d23'], [1, '#0d1013']
+    ]);
+    roundRect(g, -w / 2, -h / 2, w, h, 2); g.fill();
+    g.fillStyle = 'rgba(8,10,13,.9)';
+    g.beginPath(); g.arc(-w / 2, 0, h * 0.12, -Math.PI / 2, Math.PI / 2); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.07)';
+    roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.18, 1.5); g.fill();
+    silk(g, c, symbol, 0, 0, 11, on ? '#7dffd0' : 'rgba(228,236,246,.8)');
+    if (on) {
+      g.strokeStyle = 'rgba(125,255,208,.55)'; g.lineWidth = 1.2;
+      roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
+    }
+    label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 1.9);
+  }
+
+  real.not_gate = function (g, c) { logicChip(g, c, '1', 1); };
+  real.and_gate = function (g, c) { logicChip(g, c, '&', 2); };
+  real.or_gate = function (g, c) { logicChip(g, c, '≥1', 2); };
+
+  real.ne555 = function (g, c) {
+    var w = GRID * 2.8, h = GRID * 5;
+    var ys = [-2, 0, 2];
+    for (var i = 0; i < 3; i++) {
+      lead(g, -3 * GRID, ys[i] * GRID, -w / 2, ys[i] * GRID, 2.4);
+      lead(g, 3 * GRID, ys[i] * GRID, w / 2, ys[i] * GRID, 2.4);
+    }
+    shadowUnder(g, w, h);
+    g.fillStyle = grad(g, 'dipBody', 0, -h / 2, 0, h / 2, [
+      [0, '#40464f'], [0.18, '#272c33'], [0.72, '#191d23'], [1, '#0d1013']
+    ]);
+    roundRect(g, -w / 2, -h / 2, w, h, 2); g.fill();
+    g.fillStyle = 'rgba(8,10,13,.9)';
+    g.beginPath(); g.arc(0, -h / 2, w * 0.13, 0, Math.PI); g.fill();
+    g.fillStyle = 'rgba(190,200,212,.6)';
+    g.beginPath(); g.arc(-w * 0.3, -h * 0.38, 1.9, 0, 7); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.06)';
+    roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.08, 1.5); g.fill();
+    silk(g, c, 'NE555', 0, -h * 0.06, 8, 'rgba(232,240,248,.8)');
+    silk(g, c, c.level === '1' ? 'ВЫХ 1' : 'ВЫХ 0', 0, h * 0.12, 6.5,
+      c.level === '1' ? '#7dffd0' : 'rgba(180,195,210,.6)');
+    if (c.state && c.state.q) {
+      g.strokeStyle = 'rgba(125,255,208,.5)'; g.lineWidth = 1.2;
+      roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
+    }
+    label(g, c, [c.name || '555'], GRID * 3.1);
+  };
+})(window);
