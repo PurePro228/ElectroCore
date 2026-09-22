@@ -190,20 +190,22 @@
       color: this.wires.length % WIRE_COLORS.length,
       axis: 'h'
     };
-    // провод отходит от вывода вдоль его направления
-    if (compA) {
-      var pin = compA.def().pins[pa];
-      var horiz = Math.abs(pin.x) >= Math.abs(pin.y);
-      if (compA.rot % 2 === 1) horiz = !horiz;
-      wire.axis = horiz ? 'h' : 'v';
-    }
     this.wires.push(wire);
-    wire.mid = this.chooseMid(wire);
+    this.chooseRoute(wire);
     this.dirty = true;
     return wire;
   };
 
   /* ------------------------ разводка проводов ------------------------ */
+
+  /** Вдоль какой оси отходит провод от вывода: 'h' или 'v'. */
+  Circuit.prototype.pinAxis = function (comp, pinIndex) {
+    var pin = comp.def().pins[pinIndex];
+    if (!pin) return 'h';
+    var horiz = Math.abs(pin.x) >= Math.abs(pin.y);
+    if (comp.rot % 2 === 1) horiz = !horiz;
+    return horiz ? 'h' : 'v';
+  };
 
   /** Концы провода в координатах сетки. */
   Circuit.prototype.wireEnds = function (wire) {
@@ -259,6 +261,31 @@
     return total;
   };
 
+  /**
+   * Подбирает маршрут целиком: ось и линию коврика. Если выводы смотрят
+   * в одну сторону, эта сторона и задаёт ось; иначе берётся направление
+   * дальнего вывода, чтобы провод подходил к нему как положено.
+   * Когда предпочтительная ось не даёт развести провод, пробуется вторая.
+   */
+  Circuit.prototype.chooseRoute = function (wire) {
+    var ca = this.byId(wire.a.c), cb = this.byId(wire.b.c);
+    if (!ca || !cb) return;
+    var da = this.pinAxis(ca, wire.a.p), db = this.pinAxis(cb, wire.b.p);
+    var preferred = da === db ? da : db;
+    var other = preferred === 'h' ? 'v' : 'h';
+    var best = null;
+    [preferred, other].forEach(function (axis, k) {
+      wire.axis = axis;
+      var mid = this.chooseMid(wire);
+      wire.mid = mid;
+      var path = this.wirePath(wire);
+      var score = (path ? this.routeOverlap(wire, path) : Infinity) + k * 0.1;
+      if (!best || score < best.score) best = { axis: axis, mid: mid, score: score };
+    }, this);
+    wire.axis = best.axis;
+    wire.mid = best.mid;
+  };
+
   /** Подбирает линию коврика, на которой маршрут ни на что не ложится. */
   Circuit.prototype.chooseMid = function (wire) {
     var e = this.wireEnds(wire);
@@ -306,9 +333,7 @@
     var i, prev = Infinity;
     for (i = 0; i < this.wires.length; i++) this.wires[i].mid = undefined;
     for (var pass = 0; pass < (passes || 5); pass++) {
-      for (i = 0; i < this.wires.length; i++) {
-        this.wires[i].mid = this.chooseMid(this.wires[i]);
-      }
+      for (i = 0; i < this.wires.length; i++) this.chooseRoute(this.wires[i]);
       var total = 0;
       for (i = 0; i < this.wires.length; i++) {
         var path = this.wirePath(this.wires[i]);

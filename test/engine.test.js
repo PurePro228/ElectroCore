@@ -676,37 +676,69 @@ test('Логические элементы', function () {
   gateTest('or_gate', true, true, true);
 });
 
-test('Таймер 555 в автоколебательном режиме', function () {
-  // f = 1,44 / ((R1 + 2·R2)·C)
+test('Таймер 555: восемь выводов и автоколебания', function () {
+  // выводы: 0=GND 1=ЗАП 2=ВЫХ 3=СБР 4=УПР 5=ПОР 6=РАЗР 7=Vcc
   const R1 = 10000, R2 = 10000, C = 10e-6;
   const ct = new EC.Circuit();
   const bat = ct.add('battery', 0, 0); bat.props.V = 9; bat.props.Rint = 0.01;
-  const t = ct.add('ne555', 14, 0);
-  const r1 = ct.add('resistor', 8, -10); r1.props.R = R1;
-  const r2 = ct.add('resistor', 20, -10); r2.props.R = R2;
-  const cap = ct.add('capacitor', 26, 6); cap.props.C = C;
-  const gnd = ct.add('ground', 0, 14);
-  ct.connect(bat.id, 0, t.id, 0);            // питание
+  const t = ct.add('ne555', 16, 0);
+  const r1 = ct.add('resistor', 8, -12); r1.props.R = R1;
+  const r2 = ct.add('resistor', 24, -12); r2.props.R = R2;
+  const cap = ct.add('capacitor', 32, 6); cap.props.C = C;
+  const gnd = ct.add('ground', 0, 16);
+  check('выводов ровно восемь', EC.defs.ne555.pins.length, 8, 0);
+  ct.connect(bat.id, 0, t.id, 7);            // питание
   ct.connect(bat.id, 1, gnd.id, 0);
-  ct.connect(t.id, 1, gnd.id, 0);
+  ct.connect(t.id, 0, gnd.id, 0);            // общий
   ct.connect(bat.id, 0, r1.id, 0);           // R1: питание → разряд
-  ct.connect(r1.id, 1, t.id, 4);
-  ct.connect(t.id, 4, r2.id, 0);             // R2: разряд → порог
-  ct.connect(r2.id, 1, t.id, 3);
-  ct.connect(t.id, 3, t.id, 2);              // порог соединён с запуском
-  ct.connect(t.id, 3, cap.id, 0);            // конденсатор на землю
+  ct.connect(r1.id, 1, t.id, 6);
+  ct.connect(t.id, 6, r2.id, 0);             // R2: разряд → порог
+  ct.connect(r2.id, 1, t.id, 5);
+  ct.connect(t.id, 5, t.id, 1);              // порог соединён с запуском
+  ct.connect(t.id, 5, cap.id, 0);            // конденсатор на землю
   ct.connect(cap.id, 1, gnd.id, 0);
   const dt = 5e-5;
-  for (let i = 0; i < 20000; i++) ct.step(dt);
-  let prev = t.state.q, edges = [], time0 = ct.time;
-  for (let i = 0; i < 400000; i++) {
-    ct.step(dt);
-    if (t.state.q && !prev) edges.push(ct.time);
-    prev = t.state.q;
+
+  function measure(steps) {
+    let prev = t.state.q, edges = [];
+    for (let i = 0; i < steps; i++) {
+      ct.step(dt);
+      if (t.state.q && !prev) edges.push(ct.time);
+      prev = t.state.q;
+    }
+    return edges.length > 2 ? (edges.length - 1) / (edges[edges.length - 1] - edges[0]) : 0;
   }
-  check('генерация есть', edges.length > 3 ? 1 : 0, 1, 0);
-  const f = (edges.length - 1) / (edges[edges.length - 1] - edges[0]);
+
+  for (let i = 0; i < 20000; i++) ct.step(dt);
+  check('вывод 4 не подключён — работа не блокируется', t.reset ? 0 : 1, 1, 0);
+  const f = measure(400000);
   check('частота 1,44/((R1+2R2)C)', f, 1.44 / ((R1 + 2 * R2) * C), 0.5);
+  check('размах на конденсаторе — треть питания', cap.v > 1 && cap.v < 8 ? 1 : 0, 1, 0);
+
+  // вывод 4: сброс гасит выход
+  const rst = ct.add('vsource', 8, 16);
+  rst.props.wave = 'dc'; rst.props.amp = 0; rst.props.Rint = 1;
+  ct.connect(rst.id, 0, t.id, 3);
+  ct.connect(rst.id, 1, gnd.id, 0);
+  for (let i = 0; i < 40000; i++) ct.step(dt);
+  check('при нуле на выводе 4 выход погашен', t.level === '0' ? 1 : 0, 1, 0);
+  check('признак сброса выставлен', t.reset ? 1 : 0, 1, 0);
+  check('генерация остановлена', measure(60000), 0, 0);
+
+  rst.props.amp = 9;                          // сброс снят
+  for (let i = 0; i < 40000; i++) ct.step(dt);
+  check('после снятия сброса генерация вернулась', measure(200000) > 1 ? 1 : 0, 1, 0);
+
+  // вывод 5: снижение порога ускоряет генерацию
+  const f0 = measure(200000);
+  const ctrl = ct.add('vsource', 32, 16);
+  ctrl.props.wave = 'dc'; ctrl.props.amp = 3; ctrl.props.Rint = 10;
+  ct.connect(ctrl.id, 0, t.id, 4);
+  ct.connect(ctrl.id, 1, gnd.id, 0);
+  for (let i = 0; i < 60000; i++) ct.step(dt);
+  const f1 = measure(200000);
+  check('порог с вывода 5 задан внешне', Math.abs(t.vcc) > 1 ? 1 : 0, 1, 0);
+  check('при пороге 3 В вместо 6 В частота выросла', f1 > f0 * 1.3 ? 1 : 0, 1, 0);
 });
 
 console.log('\n' + '─'.repeat(50));

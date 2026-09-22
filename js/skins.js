@@ -773,41 +773,37 @@
   };
 
   real.opamp = function (g, c) {
-    // микросхема DIP-8
-    var w = GRID * 2.6, h = GRID * 2.0;
-    lead(g, -3 * GRID, -GRID, -w / 2, -h * 0.22, 2.4);
-    lead(g, -3 * GRID, GRID, -w / 2, h * 0.22, 2.4);
-    lead(g, 3 * GRID, 0, w / 2, -h * 0.22, 2.4);
+    // микросхема DIP-8 (в корпусе два усилителя, задействован один)
+    var w = GRID * 3.0, h = GRID * 2.6;
+    lead(g, -3 * GRID, -GRID, -w / 2, -GRID, 2.4);
+    lead(g, -3 * GRID, GRID, -w / 2, GRID, 2.4);
+    lead(g, 3 * GRID, 0, w / 2, 0, 2.4);
     shadowUnder(g, w, h);
-    // неиспользуемые ножки корпуса
+    // незадействованные ножки корпуса
     g.fillStyle = '#9aa5b0';
     for (var i = 0; i < 2; i++) {
-      g.fillRect(-w / 2 - 4, h * 0.02 + i * h * 0.3, 4, 2.4);
-      g.fillRect(w / 2, -h * 0.4 + i * h * 0.6, 4, 2.4);
+      g.fillRect(-w / 2 - 4, -h * 0.02 + i * h * 0.3, 4, 2.4);
+      g.fillRect(w / 2, -h * 0.34 + i * h * 0.62, 4, 2.4);
     }
     g.fillStyle = grad(g, 'dipBody', 0, -h / 2, 0, h / 2, [
       [0, '#40464f'], [0.18, '#272c33'], [0.72, '#191d23'], [1, '#0d1013']
     ]);
     roundRect(g, -w / 2, -h / 2, w, h, 2); g.fill();
-    // выемка и точка первого вывода
+    // ключ и точка первого вывода
     g.fillStyle = 'rgba(8,10,13,.9)';
-    g.beginPath(); g.arc(-w / 2, 0, h * 0.14, -Math.PI / 2, Math.PI / 2); g.fill();
-    g.fillStyle = 'rgba(190,200,212,.65)';
-    g.beginPath(); g.arc(-w * 0.34, -h * 0.28, 1.8, 0, 7); g.fill();
+    g.beginPath(); g.arc(-w / 2, 0, h * 0.13, -Math.PI / 2, Math.PI / 2); g.fill();
+    g.fillStyle = 'rgba(190,200,212,.62)';
+    g.beginPath(); g.arc(-w * 0.32, -h * 0.34, 1.8, 0, 7); g.fill();
     g.fillStyle = 'rgba(255,255,255,.07)';
-    roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.2, 1.5); g.fill();
-    silk(g, c, 'LM358', 0, h * 0.05, 6.5, 'rgba(232,240,248,.75)');
+    roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.16, 1.5); g.fill();
+
+    silk(g, c, 'LM358', 0, -h * 0.35, 5.4, 'rgba(228,238,248,.6)');
+    gfx.chipPins(g, c, [{ i: 0, t: '+' }, { i: 1, t: '−' }, { i: 2, t: 'ВЫХ' }], w, 5.6);
     if (c.sat) {
-      g.strokeStyle = 'rgba(255,170,90,.7)'; g.lineWidth = 1.3;
+      g.strokeStyle = 'rgba(255,170,90,.75)'; g.lineWidth = 1.3;
       roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
     }
-    g.save();
-    g.rotate(-(c.rot || 0) * Math.PI / 2);
-    g.font = '700 9px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillStyle = '#ff9b7a'; g.fillText('+', -GRID * 1.95, -GRID * 1.1);
-    g.fillStyle = '#8fb6ff'; g.fillText('−', -GRID * 1.95, GRID * 0.75);
-    g.restore();
-    label(g, c, [c.name || 'ОУ'], GRID * 1.85);
+    label(g, c, [c.name || 'ОУ'], GRID * 2.2);
   };
 
   /* ---------------------------- приборы ------------------------------ */
@@ -1075,7 +1071,7 @@
 
   real.regulator = function (g, c) {
     // стабилизатор в корпусе TO-220
-    var w = GRID * 1.9, h = GRID * 2.0;
+    var w = GRID * 2.3, h = GRID * 2.0;
     lead(g, -2 * GRID, 0, -w * 0.3, h * 0.42, 2.6);
     lead(g, 0, 2 * GRID, 0, h * 0.42, 2.6);
     lead(g, 2 * GRID, 0, w * 0.3, h * 0.42, 2.6);
@@ -1090,8 +1086,7 @@
       [0, '#3a4049'], [0.25, '#23282f'], [1, '#12151a']
     ]);
     roundRect(g, -w / 2, -h * 0.14, w, h * 0.58, 2); g.fill();
-    silk(g, c, '78' + (c.props.Vout >= 10 ? Math.round(c.props.Vout) : '0' + Math.round(c.props.Vout)),
-      0, h * 0.14, 6, 'rgba(230,238,246,.75)');
+    gfx.chipPins(g, c, EC.REG_PINS, w, 5.4);
     if (c.warn) {
       g.strokeStyle = 'rgba(255,140,90,.8)'; g.lineWidth = 1.4;
       roundRect(g, -w / 2, -h / 2, w, h * 0.98, 2); g.stroke();
@@ -1162,7 +1157,7 @@
 
   /** Логическая микросхема в корпусе DIP. */
   function logicChip(g, c, symbol, inputs) {
-    var w = GRID * 1.8, h = GRID * 2.2;
+    var w = GRID * 2.2, h = GRID * 2.2;
     if (inputs === 1) lead(g, -2 * GRID, 0, -w / 2, 0, 2.4);
     else {
       lead(g, -2 * GRID, -GRID, -w / 2, -h * 0.26, 2.4);
@@ -1179,6 +1174,9 @@
     g.beginPath(); g.arc(-w / 2, 0, h * 0.12, -Math.PI / 2, Math.PI / 2); g.fill();
     g.fillStyle = 'rgba(255,255,255,.07)';
     roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.18, 1.5); g.fill();
+    gfx.chipPins(g, c, inputs === 1
+      ? [{ i: 0, t: 'A' }, { i: 1, t: 'Y' }]
+      : [{ i: 0, t: 'A' }, { i: 1, t: 'B' }, { i: 2, t: 'Y' }], w, 5.4);
     silk(g, c, symbol, 0, 0, 11, on ? '#7dffd0' : 'rgba(228,236,246,.8)');
     if (on) {
       g.strokeStyle = 'rgba(125,255,208,.55)'; g.lineWidth = 1.2;
@@ -1192,30 +1190,37 @@
   real.or_gate = function (g, c) { logicChip(g, c, '≥1', 2); };
 
   real.ne555 = function (g, c) {
-    var w = GRID * 2.8, h = GRID * 5;
-    var ys = [-2, 0, 2];
-    for (var i = 0; i < 3; i++) {
-      lead(g, -3 * GRID, ys[i] * GRID, -w / 2, ys[i] * GRID, 2.4);
-      lead(g, 3 * GRID, ys[i] * GRID, w / 2, ys[i] * GRID, 2.4);
+    // микросхема DIP-8 с настоящей нумерацией выводов
+    var w = GRID * 3.2, h = GRID * 7;
+    for (var i = 0; i < 4; i++) {
+      var y = (-3 + i * 2) * GRID;
+      lead(g, -3 * GRID, y, -w / 2, y, 2.4);
+      lead(g, 3 * GRID, y, w / 2, y, 2.4);
     }
     shadowUnder(g, w, h);
     g.fillStyle = grad(g, 'dipBody', 0, -h / 2, 0, h / 2, [
       [0, '#40464f'], [0.18, '#272c33'], [0.72, '#191d23'], [1, '#0d1013']
     ]);
     roundRect(g, -w / 2, -h / 2, w, h, 2); g.fill();
+    // ключ и точка первого вывода
     g.fillStyle = 'rgba(8,10,13,.9)';
-    g.beginPath(); g.arc(0, -h / 2, w * 0.13, 0, Math.PI); g.fill();
+    g.beginPath(); g.arc(0, -h / 2, w * 0.12, 0, Math.PI); g.fill();
     g.fillStyle = 'rgba(190,200,212,.6)';
-    g.beginPath(); g.arc(-w * 0.3, -h * 0.38, 1.9, 0, 7); g.fill();
+    g.beginPath(); g.arc(-w * 0.36, -h * 0.41, 1.9, 0, 7); g.fill();
     g.fillStyle = 'rgba(255,255,255,.06)';
-    roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.08, 1.5); g.fill();
-    silk(g, c, 'NE555', 0, -h * 0.06, 8, 'rgba(232,240,248,.8)');
-    silk(g, c, c.level === '1' ? 'ВЫХ 1' : 'ВЫХ 0', 0, h * 0.12, 6.5,
-      c.level === '1' ? '#7dffd0' : 'rgba(180,195,210,.6)');
+    roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.06, 1.5); g.fill();
+
+    gfx.chipPins(g, c, EC.NE555_PINS, w, 5.4);
+    // надписи ставим в промежутки между рядами выводов
+    silk(g, c, 'NE555', 0, 0, 8, 'rgba(232,240,248,.82)');
+    var st = (c.reset && c.vcc > 0.5) ? 'СБРОС' : (c.level === '1' ? 'ВЫХ 1' : 'ВЫХ 0');
+    silk(g, c, st, 0, h * 0.23, 6.5,
+      (c.reset && c.vcc > 0.5) ? 'rgba(255,170,120,.9)'
+        : (c.level === '1' ? '#7dffd0' : 'rgba(180,195,210,.6)'));
     if (c.state && c.state.q) {
       g.strokeStyle = 'rgba(125,255,208,.5)'; g.lineWidth = 1.2;
       roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
     }
-    label(g, c, [c.name || '555'], GRID * 3.1);
+    label(g, c, [c.name || '555'], GRID * 4.2);
   };
 })(window);

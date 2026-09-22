@@ -191,8 +191,33 @@
     return [BAND_COLORS[d1], BAND_COLORS[d2], mul, '#c9a227'];
   }
 
+  /**
+   * Подписи выводов на корпусе микросхемы: сокращение рисуется внутри
+   * корпуса напротив своей ножки. Текст всегда остаётся горизонтальным.
+   */
+  function chipPins(g, c, list, w, size) {
+    var def = c.def();
+    g.font = '600 ' + (size || 5.6) + 'px ui-monospace, Menlo, monospace';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    for (var k = 0; k < list.length; k++) {
+      var pin = def.pins[list[k].i];
+      if (!pin) continue;
+      var inner = w / 2 - (g.measureText(list[k].t).width / 2) - 3;
+      var px = list[k].x !== undefined ? list[k].x : (pin.x > 0 ? inner : -inner);
+      var py = list[k].y !== undefined ? list[k].y : pin.y * GRID;
+      g.save();
+      g.translate(px, py);
+      g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.fillStyle = 'rgba(205,220,235,.72)';
+      g.fillText(list[k].t, 0, 0);
+      g.restore();
+    }
+  }
+
   EC.gfx = {
     roundRect: roundRect, lead: lead, leadsH: leadsH, label: label, lcd: lcd,
+    chipPins: chipPins,
     grad: grad, radial: radial, bandColors: BAND_COLORS, resistorBands: resistorBands
   };
 
@@ -1348,6 +1373,9 @@
       g.font = '700 11px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText('+', -GRID * 0.62, -GRID);
       g.fillText('−', -GRID * 0.62, GRID);
+      g.font = '600 5.5px ui-monospace, Menlo, monospace';
+      g.fillStyle = 'rgba(205,220,235,.7)';
+      g.fillText('ВЫХ', GRID * 0.25, 0);
       g.restore();
       label(g, c, [c.name || 'ОУ'], GRID * 2.3);
     }
@@ -1795,6 +1823,13 @@
     }
   });
 
+  /* Подписи выводов стабилизатора: общий вывод снизу, поэтому задан явно. */
+  var REG_PINS = [
+    { i: 0, t: 'ВХ' }, { i: 2, t: 'ВЫХ' },
+    { i: 1, t: 'ОБЩ', x: 0, y: GRID * 0.52 }
+  ];
+  EC.REG_PINS = REG_PINS;
+
   define({
     key: 'regulator', name: 'Стабилизатор', cat: 'semi',
     tip: 'Держит на выходе заданное напряжение, пока на входе хватает запаса',
@@ -1833,15 +1868,10 @@
       lead(g, 2 * GRID, 0, GRID * 1.1, 0);
       lead(g, 0, 2 * GRID, 0, GRID * 0.9);
       g.fillStyle = 'rgba(38,46,58,.95)';
-      roundRect(g, -GRID * 1.1, -GRID * 0.9, GRID * 2.2, GRID * 1.8, 3); g.fill();
+      roundRect(g, -GRID * 1.3, -GRID * 0.9, GRID * 2.6, GRID * 1.8, 3); g.fill();
       g.fillStyle = 'rgba(190,200,212,.9)';
-      roundRect(g, -GRID * 1.1, -GRID * 0.9, GRID * 2.2, GRID * 0.5, 3); g.fill();
-      g.save();
-      g.rotate(-(c.rot || 0) * Math.PI / 2);
-      g.fillStyle = '#dfe8f2'; g.font = '600 7px ui-monospace, Menlo, monospace';
-      g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(U.fmtSI(c.props.Vout, 2) + 'В', 0, GRID * 0.25);
-      g.restore();
+      roundRect(g, -GRID * 1.3, -GRID * 0.9, GRID * 2.6, GRID * 0.5, 3); g.fill();
+      gfx.chipPins(g, c, REG_PINS, GRID * 2.6, 5.4);
       label(g, c, [(c.name || '') + ' ' + U.fmtUnit(c.props.Vout, 'В')], GRID * 1.9);
     }
   });
@@ -2003,7 +2033,7 @@
         c.level = c.state.out ? '1' : '0';
       },
       draw: function (g, c) {
-        var w = GRID * 1.6, h = GRID * 1.9;
+        var w = GRID * 2.1, h = GRID * 1.9;
         if (inputs === 1) {
           lead(g, -2 * GRID, 0, -w / 2, 0);
         } else {
@@ -2016,6 +2046,7 @@
         g.strokeStyle = c.state && c.state.out ? 'rgba(125,255,208,.8)' : 'rgba(170,190,210,.7)';
         g.lineWidth = 1.3;
         roundRect(g, -w / 2, -h / 2, w, h, 3); g.stroke();
+        gfx.chipPins(g, c, gatePins(inputs), w, 5.4);
         g.save();
         g.rotate(-(c.rot || 0) * Math.PI / 2);
         g.fillStyle = '#e6eef6';
@@ -2025,6 +2056,13 @@
         label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 1.7);
       }
     };
+  }
+
+  /** Подписи выводов логического элемента: входы A, B и выход Y. */
+  function gatePins(inputs) {
+    return inputs === 1
+      ? [{ i: 0, t: 'A' }, { i: 1, t: 'Y' }]
+      : [{ i: 0, t: 'A' }, { i: 1, t: 'B' }, { i: 2, t: 'Y' }];
   }
 
   define(gate('not_gate', 'Элемент НЕ', 1, function (v) { return !v[0]; }, '1'));
@@ -2037,81 +2075,111 @@
 
   define({
     key: 'ne555', name: 'Таймер 555', cat: 'logic',
-    tip: 'Выход переключается порогами ⅓ и ⅔ питания. Классика мигалок и генераторов.',
+    tip: 'Микросхема DIP-8 с настоящей нумерацией выводов. Делитель из трёх резисторов задаёт пороги ⅓ и ⅔ питания; вывод 5 позволяет сдвинуть порог, вывод 4 — погасить выход.',
     pins: [
-      { x: -3, y: -2, name: 'Vcc' }, { x: -3, y: 2, name: 'GND' },
-      { x: -3, y: 0, name: 'ЗАП' }, { x: 3, y: -2, name: 'ПОР' },
-      { x: 3, y: 0, name: 'РАЗР' }, { x: 3, y: 2, name: 'ВЫХ' }
+      { x: -3, y: -3, name: '1 GND' },
+      { x: -3, y: -1, name: '2 ЗАП' },
+      { x: -3, y: 1, name: '3 ВЫХ' },
+      { x: -3, y: 3, name: '4 СБР' },
+      { x: 3, y: 3, name: '5 УПР' },
+      { x: 3, y: 1, name: '6 ПОР' },
+      { x: 3, y: -1, name: '7 РАЗР' },
+      { x: 3, y: -3, name: '8 Vcc' }
     ],
     props: [
       { key: 'Rout', label: 'Выходное сопр.', unit: 'Ω', def: 10, min: 0.1 },
-      { key: 'Rdis', label: 'Сопр. разряда', unit: 'Ω', def: 20, min: 0.1 }
+      { key: 'Rdis', label: 'Сопр. разряда', unit: 'Ω', def: 20, min: 0.1 },
+      { key: 'Rdiv', label: 'Резисторы делителя', unit: 'Ω', def: 5000, min: 100 },
+      { key: 'Rrst', label: 'Подтяжка сброса', unit: 'Ω', def: 100000, min: 100 }
     ],
+    internals: 1,                              // нижняя точка делителя (⅓ питания)
     init: function (c) { c.state = { q: false }; },
     stamp: function (c, ctx) {
       var m = ctx.mna;
-      var VCC = c.n[0], GND = c.n[1], DIS = c.n[4], OUT = c.n[5];
-      m.conductance(VCC, GND, 1 / 15000);        // внутренний делитель 3×5 кΩ
+      var GND = c.n[0], OUT = c.n[2], RST = c.n[3];
+      var CTRL = c.n[4], DIS = c.n[6], VCC = c.n[7];
+      var low = c.ni[0];
+      var Rd = Math.max(c.props.Rdiv, 100);
+      // делитель Vcc — вывод 5 (⅔) — внутренняя точка (⅓) — GND
+      m.conductance(VCC, CTRL, 1 / Rd);
+      m.conductance(CTRL, low, 1 / Rd);
+      m.conductance(low, GND, 1 / Rd);
+      // сброс подтянут к питанию: незадействованный вывод 4 не мешает работе
+      m.conductance(RST, VCC, 1 / Math.max(c.props.Rrst, 100));
       var q = c.state.q;
       m.conductance(OUT, q ? VCC : GND, 1 / Math.max(c.props.Rout, 0.1));
       m.conductance(OUT, q ? GND : VCC, 1e-11);
       m.conductance(DIS, GND, q ? 1e-11 : 1 / Math.max(c.props.Rdis, 0.1));
     },
     post: function (c, ctx) {
-      var vg = ctx.nv(c.n[1]);
-      var vcc = ctx.nv(c.n[0]) - vg;
-      var vTrig = ctx.nv(c.n[2]) - vg;
-      var vThr = ctx.nv(c.n[3]) - vg;
+      var vg = ctx.nv(c.n[0]);
+      var vcc = ctx.nv(c.n[7]) - vg;
+      var vUp = ctx.nv(c.n[4]) - vg;           // верхний порог — вывод 5
+      var vLow = ctx.nv(c.ni[0]) - vg;         // нижний порог — половина верхнего
       var q = c.state.q;
       if (vcc > 0.5) {
-        if (vThr > vcc * 2 / 3) q = false;       // порог сбрасывает
-        if (vTrig < vcc / 3) q = true;           // запуск имеет приоритет
+        if (ctx.nv(c.n[5]) - vg > vUp) q = false;   // порог сбрасывает
+        if (ctx.nv(c.n[1]) - vg < vLow) q = true;   // запуск имеет приоритет
+        if (ctx.nv(c.n[3]) - vg < 0.7) q = false;   // сброс главнее всего
       } else q = false;
       c.state.q = q;
 
-      var Rout = Math.max(c.props.Rout, 0.1), Rdis = Math.max(c.props.Rdis, 0.1);
-      var vOut = ctx.nv(c.n[5]) - vg;
-      var iOut = (vOut - (q ? vcc : 0)) / Rout;
-      var iDis = q ? 0 : (ctx.nv(c.n[4]) - vg) / Rdis;
-      var iDiv = vcc / 15000;
-      var iVcc = iDiv - (q ? iOut : 0);
-      c.pinI = [iVcc, 0, 0, 0, iDis, iOut];
-      c.pinI[1] = -(iVcc + iDis + iOut);
+      var Rd = Math.max(c.props.Rdiv, 100);
+      var iVccCtrl = (ctx.nv(c.n[7]) - ctx.nv(c.n[4])) / Rd;
+      var iCtrlLow = (ctx.nv(c.n[4]) - ctx.nv(c.ni[0])) / Rd;
+      var iRst = (ctx.nv(c.n[3]) - ctx.nv(c.n[7])) / Math.max(c.props.Rrst, 100);
+      var vOut = ctx.nv(c.n[2]) - vg;
+      var iOut = (vOut - (q ? vcc : 0)) / Math.max(c.props.Rout, 0.1);
+      var iDis = q ? 0 : (ctx.nv(c.n[6]) - vg) / Math.max(c.props.Rdis, 0.1);
+
+      c.pinI = [0, 0, iOut, iRst, iCtrlLow - iVccCtrl, 0, iDis,
+        iVccCtrl - iRst - (q ? iOut : 0)];
+      var sum = 0;
+      for (var k = 1; k < 8; k++) sum += c.pinI[k];
+      c.pinI[0] = -sum;                        // общий вывод замыкает баланс токов
       c.v = vOut;
       c.i = -iOut;
+      c.vcc = vcc;
       c.level = q ? '1' : '0';
+      c.reset = (ctx.nv(c.n[3]) - vg) < 0.7;
     },
     draw: function (g, c) {
-      lead(g, -3 * GRID, -2 * GRID, -GRID * 1.3, -2 * GRID);
-      lead(g, -3 * GRID, 0, -GRID * 1.3, 0);
-      lead(g, -3 * GRID, 2 * GRID, -GRID * 1.3, 2 * GRID);
-      lead(g, 3 * GRID, -2 * GRID, GRID * 1.3, -2 * GRID);
-      lead(g, 3 * GRID, 0, GRID * 1.3, 0);
-      lead(g, 3 * GRID, 2 * GRID, GRID * 1.3, 2 * GRID);
-      var w = GRID * 2.6, h = GRID * 5;
+      var w = GRID * 3.2, h = GRID * 7;
+      for (var i = 0; i < 4; i++) {
+        var y = (-3 + i * 2) * GRID;
+        lead(g, -3 * GRID, y, -w / 2, y);
+        lead(g, 3 * GRID, y, w / 2, y);
+      }
       g.fillStyle = 'rgba(34,40,50,.96)';
       roundRect(g, -w / 2, -h / 2, w, h, 3); g.fill();
       g.strokeStyle = c.state && c.state.q ? 'rgba(125,255,208,.75)' : 'rgba(170,190,210,.6)';
       g.lineWidth = 1.3;
       roundRect(g, -w / 2, -h / 2, w, h, 3); g.stroke();
+      EC.gfx.chipPins(g, c, NE555_PINS, w);
       g.save();
       g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillStyle = '#e6eef6';
       g.font = '700 10px ui-monospace, Menlo, monospace';
-      g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText('555', 0, 0);
-      g.font = '600 6px sans-serif';
-      g.fillStyle = 'rgba(200,215,230,.7)';
-      g.fillText('Vcc', -GRID * 1.9, -GRID * 2);
-      g.fillText('ЗАП', -GRID * 1.9, 0);
-      g.fillText('GND', -GRID * 1.9, GRID * 2);
-      g.fillText('ПОР', GRID * 1.9, -GRID * 2);
-      g.fillText('РАЗР', GRID * 1.95, 0);
-      g.fillText('ВЫХ', GRID * 1.9, GRID * 2);
+      if (c.reset && c.vcc > 0.5) {
+        g.font = '700 6.5px sans-serif';
+        g.fillStyle = 'rgba(255,170,120,.9)';
+        g.fillText('СБРОС', 0, GRID * 1.6);
+      }
       g.restore();
-      label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 3.2);
+      label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 4.2);
     }
   });
+
+  /* Подписи выводов таймера: индекс вывода, сокращение и номер ножки. */
+  var NE555_PINS = [
+    { i: 0, t: 'GND', n: 1 }, { i: 1, t: 'ЗАП', n: 2 },
+    { i: 2, t: 'ВЫХ', n: 3 }, { i: 3, t: 'СБР', n: 4 },
+    { i: 4, t: 'УПР', n: 5 }, { i: 5, t: 'ПОР', n: 6 },
+    { i: 6, t: 'РАЗР', n: 7 }, { i: 7, t: 'Vcc', n: 8 }
+  ];
+  EC.NE555_PINS = NE555_PINS;
 
   /* Порядок разделов в палитре. */
   var ORDER = ['passive', 'source', 'switch', 'semi', 'logic', 'actuator', 'meter'];
