@@ -341,6 +341,7 @@
       else if (act === 'load') { if (loadLocal()) toast('Схема загружена'); else toast('Сохранённых схем нет'); }
       else if (act === 'export') exportFile();
       else if (act === 'import') $('fileInput').click();
+      else if (act === 'ai') openAiModal();
       else if (act === 'help') $('helpModal').hidden = false;
     });
     $('skinSeg').addEventListener('click', function (e) {
@@ -348,6 +349,7 @@
       if (sk) applySkin(sk);
     });
     buildIsaTable();
+    bindAi();
     $('helpClose').addEventListener('click', function () { $('helpModal').hidden = true; });
     $('helpModal').addEventListener('click', function (e) {
       if (e.target === $('helpModal')) $('helpModal').hidden = true;
@@ -367,6 +369,91 @@
       $('speedVal').textContent = formatSpeed(state.speed);
     });
     $('fileInput').addEventListener('change', importFile);
+  }
+
+  /* ================================================================== */
+  /*  Схема через ИИ                                                     */
+  /* ================================================================== */
+
+  function openAiModal() {
+    $('aiModal').hidden = false;
+    var text = EC.aiPrompt.build();
+    var bytes = new Blob([text]).size;          // в кириллице символ занимает два байта
+    var n = Object.keys(EC.defs).length;
+    $('aiSize').textContent = Math.round(bytes / 1024) + ' КБ · ' + n + ' ' + plural(n, ['деталь', 'детали', 'деталей']);
+  }
+
+  /** Склонение существительного при числе: 1 деталь, 2 детали, 5 деталей. */
+  function plural(n, forms) {
+    var a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return forms[2];
+    if (b > 1 && b < 5) return forms[1];
+    if (b === 1) return forms[0];
+    return forms[2];
+  }
+
+  function bindAi() {
+    $('aiClose').addEventListener('click', function () { $('aiModal').hidden = true; });
+    $('aiModal').addEventListener('click', function (e) {
+      if (e.target === $('aiModal')) $('aiModal').hidden = true;
+    });
+    $('aiDownload').addEventListener('click', function () {
+      var blob = new Blob([EC.aiPrompt.build()], { type: 'text/plain;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'electrocore-ai-prompt.txt';   // имя без кириллицы — переживает любую систему
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+      toast('Описание сохранено');
+    });
+    $('aiCurrent').addEventListener('click', function () {
+      $('aiInput').value = JSON.stringify(EC.aiPrompt.export(circuit, 'Текущая схема'), null, 2);
+      showAiResult(null, [], ['Схема со стола записана в поле. Скопируйте её вместе с описанием и попросите ИИ внести правки.']);
+    });
+    $('aiBuild').addEventListener('click', buildFromAi);
+  }
+
+  function buildFromAi() {
+    var res = EC.aiPrompt.parse($('aiInput').value);
+    if (!res.ok) { showAiResult(false, res.errors, res.warnings); return; }
+    pushUndo();
+    setCircuit(res.circuit);
+    renderer.fit();
+    state.running = true;
+    updateRunUI();
+    showAiResult(true, [], res.warnings, res);
+    if (res.note) showAlert(res.note, 'info', 12000);
+  }
+
+  /** Показывает итог разбора: что собралось, что не так. */
+  function showAiResult(ok, errors, warnings, res) {
+    var host = $('aiResult');
+    var html = '';
+    if (ok === true && res) {
+      var nc = res.circuit.components.length, nw = res.circuit.wires.length;
+      html += '<div class="ok">Собрано: «' + escapeHtml(res.title) + '» — ' +
+        nc + ' ' + plural(nc, ['деталь', 'детали', 'деталей']) + ', ' +
+        nw + ' ' + plural(nw, ['провод', 'провода', 'проводов']) + '.</div>';
+    } else if (ok === false) {
+      html += '<div class="bad">Схему собрать не удалось:</div>';
+    }
+    if (errors && errors.length) {
+      html += '<ul>' + errors.map(function (e) {
+        return '<li>' + escapeHtml(e) + '</li>';
+      }).join('') + '</ul>';
+    }
+    if (warnings && warnings.length) {
+      html += '<ul>' + warnings.map(function (w) {
+        return '<li class="warn">' + escapeHtml(w) + '</li>';
+      }).join('') + '</ul>';
+    }
+    host.innerHTML = html;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+    });
   }
 
   /** Справочная таблица команд процессора — строится из его же описания. */

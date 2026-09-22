@@ -168,6 +168,7 @@
       <input type="range" id="optSpeed" min="-2" max="0.7" step="0.05" value="0">
     </label>
     <hr>
+    <button data-act="ai">Схема через ИИ…</button>
     <button data-act="help">Справка и горячие клавиши</button>
   </div>
 
@@ -184,6 +185,52 @@
         <p class="muted">Выберите схему — она соберётся на столе и сразу заработает.
         Меняйте номиналы и смотрите, что изменится.</p>
         <div class="ex-list" id="exampleList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================= Схема через ИИ ====================== -->
+  <div class="modal" id="aiModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Схема через ИИ</h2>
+        <button class="icon-btn" id="aiClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted">Языковая модель может собрать схему за вас — даже
+        если про ElectroCore она ничего не знает. Описание формата ниже
+        объясняет ей всё: какие есть детали, как нумеруются выводы,
+        как расставлять элементы и в каком виде отвечать.</p>
+
+        <ol class="ai-steps">
+          <li>
+            <b>Скачайте описание</b> и приложите его к разговору с ИИ.
+            <div class="ai-row">
+              <button id="aiDownload" class="btn ai-btn">Скачать описание (.txt)</button>
+              <span class="ai-size" id="aiSize"></span>
+            </div>
+          </li>
+          <li>
+            <b>Напишите, что нужно собрать.</b> Например: «собери блок питания
+            на 5 вольт от переменных 24 вольт» или «сделай светофор на
+            процессоре: зелёный, жёлтый, красный по кругу».
+          </li>
+          <li>
+            <b>Вставьте ответ сюда.</b> Рамки <code>```</code> и пояснения
+            вокруг JSON убирать не нужно.
+            <textarea id="aiInput" class="code-edit ai-input" spellcheck="false"
+              placeholder="Сюда вставьте ответ модели…"></textarea>
+            <div class="ai-row">
+              <button id="aiBuild" class="btn primary ai-btn">Собрать схему</button>
+              <button id="aiCurrent" class="btn ai-btn">Вставить текущую схему</button>
+            </div>
+            <div class="ai-result" id="aiResult"></div>
+          </li>
+        </ol>
+
+        <p class="muted">Кнопка «Вставить текущую схему» кладёт в поле то,
+        что сейчас на столе — удобно, когда нужно попросить ИИ что-то
+        переделать в уже собранной схеме.</p>
       </div>
     </div>
   </div>
@@ -252,6 +299,7 @@
 <script src="js/skins.js"></script>
 <script src="js/scope.js"></script>
 <script src="js/examples.js"></script>
+<script src="js/aiprompt.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

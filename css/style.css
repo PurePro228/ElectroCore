@@ -625,6 +625,25 @@ input[type=range]::-moz-range-thumb {
 .code-err.ok { color: var(--text-mute); }
 .code-err.bad { color: var(--danger); }
 
+.ai-steps { margin: 14px 0 0; padding-left: 20px; }
+.ai-steps li { margin-bottom: 16px; line-height: 1.6; }
+.ai-steps b { color: var(--text); }
+.ai-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.ai-btn {
+  background: var(--fill-3);
+  border: 1px solid var(--line);
+  height: 34px;
+}
+.ai-btn.primary { border-color: transparent; }
+.ai-size { font-size: 11.5px; color: var(--text-mute); font-family: ui-monospace, Menlo, monospace; }
+.ai-input { min-height: 150px; margin-top: 8px; font-size: 11px; }
+.ai-result { margin-top: 10px; font-size: 12px; line-height: 1.55; }
+.ai-result .ok { color: var(--accent-2); font-weight: 600; }
+.ai-result .bad { color: var(--danger); font-weight: 600; }
+.ai-result ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-dim); }
+.ai-result li { margin-bottom: 3px; }
+.ai-result .warn { color: var(--amber); }
+
 /* =============================== Модалка ================================ */
 
 .modal {

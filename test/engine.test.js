@@ -4,7 +4,7 @@
 'use strict';
 const path = require('path');
 global.window = {};
-['util', 'solver', 'cpu', 'components', 'circuit'].forEach(function (m) {
+['util', 'solver', 'cpu', 'components', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
   require(path.join(__dirname, '..', 'js', m + '.js'));
 });
 const EC = global.window.EC;
@@ -933,6 +933,208 @@ test('Вывод сброса и внешнее тактирование', funct
   rst.props.amp = 5;
   run(ct, 0.5, 2e-4);
   check('после снятия сброса счёт возобновился', cpu.state.m.cycles > 50 ? 1 : 0, 1, 0);
+});
+
+test('Описание для ИИ полно и согласовано', function () {
+  const text = EC.aiPrompt.build();
+  check('описание непустое', text.length > 10000 ? 1 : 0, 1, 0);
+
+  const missing = Object.keys(EC.defs).filter(k => text.indexOf('\n' + k + ' — ') < 0);
+  check('все детали перечислены', missing.length, 0, 0);
+  if (missing.length) console.log('      нет в описании:', missing.join(', '));
+
+  const noIsa = EC.cpu.ISA.filter(d => text.indexOf('  ' + d.m) < 0);
+  check('все команды процессора перечислены', noIsa.length, 0, 0);
+
+  // габариты в тексте должны совпадать с настоящими
+  const ct = new EC.Circuit();
+  let wrong = 0;
+  Object.keys(EC.defs).forEach(k => {
+    const fp = EC.aiPrompt.footprint(k);
+    if (text.indexOf('габарит: ' + fp.w + ' × ' + fp.h + ' клеток') < 0) wrong++;
+  });
+  check('габариты в описании настоящие', wrong, 0, 0);
+
+  check('формат назван', text.indexOf('electrocore/1') >= 0 ? 1 : 0, 1, 0);
+  check('правило поворота описано', text.indexOf('rot 1  →  (−dy,  dx)') >= 0 ? 1 : 0, 1, 0);
+  check('есть рабочий пример', text.indexOf('"components"') >= 0 ? 1 : 0, 1, 0);
+
+  // встроенный пример должен разбираться и работать:
+  // берём весь раздел с примером, разбор сам найдёт в нём JSON
+  const a = text.indexOf('5. ПОЛНЫЙ ПРИМЕР');
+  const b = text.indexOf('6. СПРАВОЧНИК');
+  check('раздел с примером на месте', a > 0 && b > a ? 1 : 0, 1, 0);
+  const sample = EC.aiPrompt.parse(text.slice(a, b));
+  check('пример из описания собирается', sample.ok ? 1 : 0, 1, 0);
+  check('в примере нет предупреждений', sample.warnings.length, 0, 0);
+});
+
+test('Обмен схемами: выгрузка и загрузка', function () {
+  let bad = 0;
+  EC.examples.forEach(ex => {
+    const orig = ex.make();
+    const json = JSON.stringify(EC.aiPrompt.export(orig, ex.name));
+    const back = EC.aiPrompt.parse(json);
+    if (!back.ok ||
+      back.circuit.components.length !== orig.components.length ||
+      back.circuit.wires.length !== orig.wires.length) {
+      bad++;
+      console.log('      не сошлось:', ex.id, back.errors.join('; '));
+    }
+  });
+  check('все 13 примеров переживают обход', bad, 0, 0);
+
+  // расчёт после обхода совпадает
+  const orig = EC.examples.find(e => e.id === 'led').make();
+  run(orig, 1e-3);
+  const back = EC.aiPrompt.parse(JSON.stringify(EC.aiPrompt.export(orig, 'led')));
+  run(back.circuit, 1e-3);
+  const a = orig.components.find(c => c.type === 'led');
+  const b = back.circuit.components.find(c => c.type === 'led');
+  check('ток светодиода тот же', b.i, a.i, 1e-9);
+});
+
+test('Разбор ответа модели: мусор вокруг и ошибки', function () {
+  const good = {
+    format: 'electrocore/1', title: 'Делитель',
+    components: [
+      { id: 'GB1', type: 'battery', x: -14, y: 0, rot: 1, props: { V: 9 } },
+      { id: 'R1', type: 'resistor', x: 0, y: -8, props: { R: '1k' } },
+      { id: 'R2', type: 'resistor', x: 0, y: 8, props: { R: 2000 } },
+      { id: 'GND1', type: 'ground', x: -14, y: 12 }
+    ],
+    wires: [
+      { from: 'GB1', fromPin: 0, to: 'R1', toPin: 0 },
+      { from: 'R1', fromPin: 1, to: 'R2', toPin: 0 },
+      { from: 'R2', fromPin: 1, to: 'GND1', toPin: 0 },
+      { from: 'GB1', fromPin: 1, to: 'GND1', toPin: 0 }
+    ]
+  };
+  const wrapped = 'Вот схема:\n\n```json\n' + JSON.stringify(good) + '\n```\n\nГотово!';
+  const r = EC.aiPrompt.parse(wrapped);
+  check('ответ в рамках разобран', r.ok ? 1 : 0, 1, 0);
+  check('предупреждений нет', r.warnings.length, 0, 0);
+  run(r.circuit, 1e-3);
+  const R1 = r.circuit.components.find(c => c.name === 'R1');
+  check('делитель считает верно', Math.abs(R1.i), 9 / 3000, 1e-5);
+  check('строка «1k» превратилась в 1000', R1.props.R, 1000, 0);
+
+  check('пустой текст — ошибка', EC.aiPrompt.parse('привет').ok ? 0 : 1, 1, 0);
+  check('битый JSON — ошибка', EC.aiPrompt.parse('{ "components": [ ').ok ? 0 : 1, 1, 0);
+
+  let r2 = EC.aiPrompt.parse(JSON.stringify({
+    components: [{ id: 'X1', type: 'нетакого', x: 0, y: 0 }]
+  }));
+  check('неизвестный тип — ошибка', r2.ok ? 0 : 1, 1, 0);
+  check('ошибка называет тип', r2.errors[0].indexOf('нетакого') >= 0 ? 1 : 0, 1, 0);
+
+  r2 = EC.aiPrompt.parse(JSON.stringify({
+    components: [
+      { id: 'R1', type: 'resistor', x: 0, y: 0 },
+      { id: 'R1', type: 'resistor', x: 20, y: 0 }
+    ]
+  }));
+  check('повтор обозначения — ошибка', r2.ok ? 0 : 1, 1, 0);
+
+  r2 = EC.aiPrompt.parse(JSON.stringify({
+    components: [{ id: 'R1', type: 'resistor', x: 0, y: 0 }],
+    wires: [{ from: 'R1', fromPin: 0, to: 'R9', toPin: 0 }]
+  }));
+  check('ссылка на несуществующую деталь — ошибка', r2.ok ? 0 : 1, 1, 0);
+
+  r2 = EC.aiPrompt.parse(JSON.stringify({
+    components: [
+      { id: 'R1', type: 'resistor', x: 0, y: 0 },
+      { id: 'R2', type: 'resistor', x: 20, y: 0 }
+    ],
+    wires: [{ from: 'R1', fromPin: 5, to: 'R2', toPin: 0 }]
+  }));
+  check('выход за число выводов — ошибка', r2.ok ? 0 : 1, 1, 0);
+  check('ошибка подсказывает диапазон', r2.errors[0].indexOf('0…1') >= 0 ? 1 : 0, 1, 0);
+});
+
+test('Разбор предупреждает о типичных промахах', function () {
+  // детали наложены друг на друга
+  let r = EC.aiPrompt.parse(JSON.stringify({
+    components: [
+      { id: 'R1', type: 'resistor', x: 0, y: 0 },
+      { id: 'R2', type: 'resistor', x: 1, y: 0 },
+      { id: 'GND1', type: 'ground', x: 0, y: 20 }
+    ],
+    wires: [
+      { from: 'R1', fromPin: 0, to: 'R2', toPin: 0 },
+      { from: 'R2', fromPin: 1, to: 'GND1', toPin: 0 }
+    ]
+  }));
+  check('наложение замечено', r.warnings.some(w => w.indexOf('перекрыва') >= 0) ? 1 : 0, 1, 0);
+
+  // нет земли
+  r = EC.aiPrompt.parse(JSON.stringify({
+    components: [
+      { id: 'GB1', type: 'battery', x: 0, y: 0 },
+      { id: 'R1', type: 'resistor', x: 16, y: 0 }
+    ],
+    wires: [
+      { from: 'GB1', fromPin: 0, to: 'R1', toPin: 0 },
+      { from: 'GB1', fromPin: 1, to: 'R1', toPin: 1 }
+    ]
+  }));
+  check('отсутствие земли замечено', r.warnings.some(w => w.indexOf('земли') >= 0) ? 1 : 0, 1, 0);
+
+  // деталь висит в воздухе
+  r = EC.aiPrompt.parse(JSON.stringify({
+    components: [
+      { id: 'GB1', type: 'battery', x: 0, y: 0 },
+      { id: 'R1', type: 'resistor', x: 16, y: 0 },
+      { id: 'C9', type: 'capacitor', x: 40, y: 20 },
+      { id: 'GND1', type: 'ground', x: 0, y: 20 }
+    ],
+    wires: [
+      { from: 'GB1', fromPin: 0, to: 'R1', toPin: 0 },
+      { from: 'R1', fromPin: 1, to: 'GND1', toPin: 0 },
+      { from: 'GB1', fromPin: 1, to: 'GND1', toPin: 0 }
+    ]
+  }));
+  check('неподключённая деталь замечена', r.warnings.some(w => w.indexOf('C9') >= 0) ? 1 : 0, 1, 0);
+
+  // недопустимое значение списка
+  r = EC.aiPrompt.parse(JSON.stringify({
+    components: [{ id: 'HL1', type: 'led', x: 0, y: 0, props: { color: 'розовый' } },
+      { id: 'GND1', type: 'ground', x: 0, y: 20 }],
+    wires: [{ from: 'HL1', fromPin: 1, to: 'GND1', toPin: 0 }]
+  }));
+  check('чужое значение параметра замечено', r.warnings.some(w => w.indexOf('розовый') >= 0) ? 1 : 0, 1, 0);
+  check('схема всё равно собрана', r.ok ? 1 : 0, 1, 0);
+});
+
+test('Схема с процессором проходит через обмен', function () {
+  const code = 'старт:  LDI 0b1111\n        DIR\n        LDI 1\n        OUT\n        JMP старт';
+  const r = EC.aiPrompt.parse(JSON.stringify({
+    format: 'electrocore/1',
+    components: [
+      { id: 'GB1', type: 'battery', x: -22, y: 0, rot: 1, props: { V: 5 } },
+      { id: 'DD1', type: 'cpu8', x: 0, y: 0, props: { code: code, freq: 2000 } },
+      { id: 'R1', type: 'resistor', x: 14, y: 3, props: { R: 330 } },
+      { id: 'HL1', type: 'led', x: 26, y: 3 },
+      { id: 'GND1', type: 'ground', x: -22, y: 16 }
+    ],
+    wires: [
+      { from: 'GB1', fromPin: 0, to: 'DD1', toPin: 0 },
+      { from: 'DD1', fromPin: 3, to: 'GND1', toPin: 0 },
+      { from: 'GB1', fromPin: 1, to: 'GND1', toPin: 0 },
+      { from: 'DD1', fromPin: 4, to: 'R1', toPin: 0 },
+      { from: 'R1', fromPin: 1, to: 'HL1', toPin: 0 },
+      { from: 'HL1', fromPin: 1, to: 'GND1', toPin: 0 }
+    ]
+  }));
+  check('схема с процессором собрана', r.ok ? 1 : 0, 1, 0);
+  check('предупреждений нет', r.warnings.length, 0, 0);
+  const cpu = r.circuit.components.find(c => c.type === 'cpu8');
+  check('программа принята без ошибок', cpu.state.asm.ok ? 1 : 0, 1, 0);
+  run(r.circuit, 0.2, 5e-4);
+  const led = r.circuit.components.find(c => c.type === 'led');
+  check('процессор зажёг светодиод', led.i > 0.005 ? 1 : 0, 1, 0);
+  check('счётчик команд идёт', cpu.state.m.cycles > 100 ? 1 : 0, 1, 0);
 });
 
 console.log('\n' + '─'.repeat(50));

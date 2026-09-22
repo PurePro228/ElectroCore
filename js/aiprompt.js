@@ -1,0 +1,526 @@
+/* ElectroCore — обмен схемами с языковой моделью.
+ *
+ * build()  — собирает текстовое описание формата: система координат, правила
+ *            размещения, справочник всех деталей с габаритами и выводами.
+ *            Текст строится из тех же определений, по которым работает
+ *            симулятор, поэтому не может разойтись с действительностью.
+ * parse()  — разбирает ответ модели и превращает его в схему.
+ * export() — обратное преобразование: схема в тот же JSON.
+ */
+(function (global) {
+  'use strict';
+  var EC = global.EC, U = EC.util;
+
+  var FORMAT = 'electrocore/1';
+  var MM_PER_CELL = 1.27;                      // 2 клетки = 2,54 мм — шаг DIP
+
+  /* ------------------------------------------------------------------ */
+  /*  Сведения о детали                                                  */
+  /* ------------------------------------------------------------------ */
+
+  function footprint(type) {
+    var c = new EC.Component(type, 0, 0);
+    var b = c.bounds();
+    return {
+      w: Math.round(b.w * 10) / 10,
+      h: Math.round(b.h * 10) / 10,
+      x0: Math.round(b.x * 10) / 10,
+      y0: Math.round(b.y * 10) / 10
+    };
+  }
+
+  function pinList(def) {
+    return def.pins.map(function (p, i) {
+      var nm = p.name ? ' «' + p.name + '»' : '';
+      return i + nm + ' (' + p.x + ',' + p.y + ')';
+    }).join(' · ');
+  }
+
+  function propLine(p) {
+    var parts = [p.key + ' = '];
+    if (p.type === 'select') {
+      parts.push(JSON.stringify(p.def));
+      parts.push(' — одно из: ' + p.options.map(function (o) { return o.v; }).join(', '));
+    } else if (p.type === 'bool') {
+      parts.push(String(p.def) + ' (true или false)');
+    } else if (p.type === 'code') {
+      parts.push('"текст программы" (см. раздел про процессор)');
+    } else {
+      parts.push(String(p.def));
+      var range = [];
+      if (p.min !== undefined) range.push('не меньше ' + p.min);
+      if (p.max !== undefined) range.push('не больше ' + p.max);
+      if (range.length) parts.push(' (' + range.join(', ') + ')');
+    }
+    var tail = ' — ' + p.label + (p.unit ? ', ' + p.unit : '');
+    return parts.join('') + tail;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  Сборка текста                                                      */
+  /* ------------------------------------------------------------------ */
+
+  function build() {
+    var L = [];
+    var add = function (s) { L.push(s === undefined ? '' : s); };
+    var rule = function (ch) { add(new Array(69).join(ch || '-')); };
+
+    rule('=');
+    add(' ELECTROCORE — КАК СОБРАТЬ СХЕМУ');
+    add(' Описание формата для языковой модели.');
+    add(' Файл собран самой программой, поэтому всегда соответствует ей.');
+    rule('=');
+    add();
+    add('ElectroCore — симулятор электроники. Он считает схему по законам');
+    add('электротехники: метод узловых потенциалов, метод Ньютона для');
+    add('нелинейных элементов. Схема лежит на поле в клетку.');
+    add();
+    add('Тебе дают этот файл и просьбу человека. Собери схему и выдай её');
+    add('в формате JSON, описанном ниже. Человек вставит твой ответ в');
+    add('программу, и схема появится на столе и сразу заработает.');
+    add();
+
+    rule('=');
+    add(' 1. ГЛАВНОЕ ПРАВИЛО ОТВЕТА');
+    rule('=');
+    add();
+    add('Выдай РОВНО ОДИН блок JSON. Внутри блока — только JSON, без');
+    add('комментариев (в JSON их не бывает) и без многоточий. Пояснения');
+    add('для человека пиши до или после блока, не внутри.');
+    add();
+    add('Схема должна быть рабочей: если её не проверить в уме, человек');
+    add('получит мёртвый стол. Мысленно проследи каждую цепь от плюса');
+    add('источника до земли.');
+    add();
+
+    rule('=');
+    add(' 2. СИСТЕМА КООРДИНАТ');
+    rule('=');
+    add();
+    add('Поле бесконечное, единица измерения — клетка.');
+    add('  x растёт вправо, y растёт ВНИЗ.');
+    add('  Координаты целые. Ноль может быть где угодно, удобно ставить');
+    add('  первую деталь около (0,0).');
+    add();
+    add('Масштаб: 2 клетки = 2,54 мм — это шаг выводов микросхем и');
+    add('макетной платы. Между рядами выводов микросхемы 6 клеток =');
+    add('7,62 мм, как у настоящего корпуса DIP.');
+    add();
+    add('Оговорка: точен именно шаг выводов. Корпуса отдельных деталей');
+    add('нарисованы крупнее натуральной величины, чтобы читались на');
+    add('экране. Для раскладки это неважно — ориентируйся на габариты');
+    add('в клетках из справочника, они настоящие.');
+    add();
+    add('Поворот детали задаётся полем "rot": 0, 1, 2, 3 — это 0°, 90°,');
+    add('180°, 270° по часовой стрелке. Вывод с локальным смещением');
+    add('(dx, dy) из справочника после поворота оказывается в точке:');
+    add();
+    add('    rot 0  →  ( dx,  dy)        rot 2  →  (−dx, −dy)');
+    add('    rot 1  →  (−dy,  dx)        rot 3  →  ( dy, −dx)');
+    add();
+    add('Абсолютная координата вывода = координата детали + это смещение.');
+    add();
+    add('Пример: резистор в точке (10, 4) без поворота имеет выводы');
+    add('в (8, 4) и (12, 4). Он же с rot=1 — в (10, 2) и (10, 6),');
+    add('то есть встаёт вертикально.');
+    add();
+
+    rule('=');
+    add(' 3. КАК РАСКЛАДЫВАТЬ ДЕТАЛИ');
+    rule('=');
+    add();
+    add('У каждой детали в справочнике указан габарит в клетках. Это');
+    add('прямоугольник вокруг её центра, куда попадает корпус и выводы.');
+    add();
+    add('ПРАВИЛА:');
+    add();
+    add('  1. Габариты двух деталей НЕ должны пересекаться. Это главная');
+    add('     ошибка при автоматической раскладке — проверь её отдельно.');
+    add();
+    add('  2. Между габаритами оставляй минимум 2 клетки. Если между');
+    add('     деталями пойдут провода — 4…6 клеток.');
+    add();
+    add('  3. Соседние детали одной цепочки ставь с шагом 10…14 клеток');
+    add('     по оси цепочки. Параллельные цепочки (например четыре');
+    add('     светодиода) разноси на 6…8 клеток.');
+    add();
+    add('  4. ВАЖНО: выводы разных деталей, оказавшиеся в ОДНОЙ точке,');
+    add('     соединяются автоматически, без провода. Это удобно, когда');
+    add('     нужно состыковать детали вплотную, но если ты не хотел');
+    add('     такого соединения — держи расстояние.');
+    add();
+    add('  5. Привычная компоновка: питание сверху, земля снизу, сигнал');
+    add('     идёт слева направо. Источник слева, нагрузка справа.');
+    add();
+    add('  6. Земля («ground») нужна почти всегда — это опорная точка');
+    add('     отсчёта напряжений. Ставь ОДНУ землю на схему и своди к');
+    add('     ней все обратные провода. Без земли программа сама выберет');
+    add('     опорный узел, и показания будут считаться от него.');
+    add();
+    add('  7. Обозначения в поле "id" давай по ГОСТ: R1 R2 — резисторы,');
+    add('     C — конденсаторы, L — катушки, VD — диоды, VT — транзисторы,');
+    add('     DD — цифровые микросхемы, DA — аналоговые, HL — лампы и');
+    add('     светодиоды, GB — батареи, SA — выключатели, SB — кнопки,');
+    add('     M — двигатели, HA — зуммеры, PV PA PW — приборы.');
+    add('     Эти обозначения будут видны на схеме.');
+    add();
+    add('  8. Провода прокладываются САМИ: программа выбирает свободные');
+    add('     линии сетки и разводит их так, чтобы не накладывались.');
+    add('     Тебе достаточно сказать, что с чем соединить.');
+    add();
+
+    rule('=');
+    add(' 4. ФОРМАТ ОТВЕТА');
+    rule('=');
+    add();
+    add('{');
+    add('  "format": "' + FORMAT + '",');
+    add('  "title": "Название схемы",');
+    add('  "note": "Одна-две фразы, что схема делает (необязательно)",');
+    add('  "components": [');
+    add('    {');
+    add('      "id": "R1",            строка, уникальна, станет обозначением');
+    add('      "type": "resistor",    ключ из справочника ниже');
+    add('      "x": 10, "y": 4,       целые координаты центра');
+    add('      "rot": 0,              0..3, можно не писать если 0');
+    add('      "props": { "R": 470 }  параметры, можно не писать');
+    add('    }');
+    add('  ],');
+    add('  "wires": [');
+    add('    {');
+    add('      "from": "GB1", "fromPin": 0,');
+    add('      "to":   "R1",  "toPin":   0,');
+    add('      "color": 0            0..9, необязательно (см. ниже)');
+    add('    }');
+    add('  ]');
+    add('}');
+    add();
+    add('ЗНАЧЕНИЯ ПАРАМЕТРОВ пиши числами в основных единицах СИ:');
+    add('  сопротивление в омах:      4,7 кОм  →  4700');
+    add('  ёмкость в фарадах:         100 нФ   →  1e-7');
+    add('  индуктивность в генри:     1 мГн    →  0.001');
+    add('  напряжение в вольтах, ток в амперах, частота в герцах.');
+    add('Строки вида "4.7k" тоже принимаются, но числа надёжнее.');
+    add();
+    add('ЦВЕТА ПРОВОДОВ ("color", необязательно) — как в наборе перемычек:');
+    var colors = EC.WIRE_COLORS.map(function (c, i) { return i + ' ' + c.name; });
+    while (colors.length) add('  ' + colors.splice(0, 4).join(' · '));
+    add('Если не указывать, цвета назначатся по кругу. Осмысленно:');
+    add('красный на плюс питания, чёрный на общий провод.');
+    add();
+
+    /* ------------------------- рабочий пример ----------------------- */
+    rule('=');
+    add(' 5. ПОЛНЫЙ ПРИМЕР');
+    rule('=');
+    add();
+    add('Это настоящая рабочая схема — светодиод с токоограничивающим');
+    add('резистором и выключателем. Разбери её строчку за строчкой.');
+    add();
+    var sample = EC.examples ? EC.examples[0].make() : null;
+    if (sample) {
+      JSON.stringify(exportCircuit(sample, 'Светодиод и резистор'), null, 2)
+        .split('\n').forEach(function (s) { add(s); });
+    }
+    add();
+    add('Разбор: выключатель и резистор стоят в одну линию с запасом по');
+    add('7…8 клеток; светодиод развёрнут (rot=1) и потому стоит');
+    add('вертикально; земля одна, к ней сходятся и минус батареи, и');
+    add('катод светодиода. Габариты нигде не пересекаются.');
+    add();
+    add('Провода в примере заданы только парами «деталь — вывод»:');
+    add('как именно они лягут на поле, программа решит сама.');
+    add();
+
+    /* -------------------------- справочник -------------------------- */
+    rule('=');
+    add(' 6. СПРАВОЧНИК ДЕТАЛЕЙ (' + Object.keys(EC.defs).length + ')');
+    rule('=');
+    add();
+    add('Формат записи:');
+    add('  ключ — Название');
+    add('    габарит: Ш × В клеток');
+    add('    выводы: индекс «имя» (dx,dy) · …');
+    add('    параметры: имя = значение — пояснение');
+    add();
+    add('Индекс вывода — это число для полей "fromPin" и "toPin".');
+    add();
+
+    EC.categories.forEach(function (cat) {
+      rule('-');
+      add(' ' + cat.name.toUpperCase());
+      rule('-');
+      add();
+      cat.items.forEach(function (key) {
+        var def = EC.defs[key];
+        var fp = footprint(key);
+        add(key + ' — ' + def.name);
+        if (def.tip) add('    ' + def.tip);
+        add('    габарит: ' + fp.w + ' × ' + fp.h + ' клеток');
+        add('    выводы: ' + (def.pins.length ? pinList(def) : 'нет'));
+        if (def.props.length) {
+          add('    параметры:');
+          def.props.forEach(function (p) { add('      ' + propLine(p)); });
+        }
+        add();
+      });
+    });
+
+    /* -------------------------- процессор --------------------------- */
+    rule('=');
+    add(' 7. ПРОЦЕССОР EC-8');
+    rule('=');
+    add();
+    add('Если в схеме нужен процессор, его программа пишется в параметре');
+    add('"code" обычным текстом. В JSON переводы строк записывай как \\n.');
+    add();
+    add('Устройство: восемь бит, регистры A и B, флаги нуля (Z) и переноса');
+    add('(C), память 256 байт — в ней и программа, и данные, и стек.');
+    add('Стек растёт вниз от адреса 0xFF, под переменные удобно брать');
+    add('адреса 0xF0…0xFE.');
+    add();
+    add('Правила записи:');
+    add('  метка:  объявляется двоеточием в начале строки');
+    add('  ;       всё после точки с запятой — комментарий');
+    add('  числа   200, 0xC8, $C8, 0b11001000 — одно и то же');
+    add('  DB      кладёт байты в память подряд');
+    add();
+    add('Линии порта P0…P3 — настоящие выводы. Перед работой настрой');
+    add('направление: положи маску в A и выполни DIR (1 = выход).');
+    add('OUT выдаёт младшие четыре бита A на выводы, IN читает их в A.');
+    add();
+    add('СИСТЕМА КОМАНД:');
+    add();
+    EC.cpu.ISA.forEach(function (d) {
+      var operand = d.arg === 'n' ? ' число' : (d.arg === 'a' ? ' адрес' : '');
+      add('  ' + (d.m + operand + '                ').slice(0, 14) +
+        '0x' + EC.cpu.hex(d.op) + '  ' + d.t);
+    });
+    add();
+    add('Задержки делай вложенными циклами — отдельной команды паузы нет.');
+    add('При частоте 2000 Гц одна команда занимает 0,5 мс, а пауза из');
+    add('двух циклов 10×25 даёт примерно полсекунды.');
+    add();
+
+    /* --------------------------- проверка --------------------------- */
+    rule('=');
+    add(' 8. ПРОВЕРЬ ПЕРЕД ОТВЕТОМ');
+    rule('=');
+    add();
+    add('  [ ] JSON синтаксически верен, без комментариев и многоточий');
+    add('  [ ] "type" каждой детали есть в справочнике');
+    add('  [ ] все "id" различны, а "from"/"to" ссылаются на существующие');
+    add('  [ ] номера выводов не выходят за границы (см. справочник)');
+    add('  [ ] габариты деталей нигде не пересекаются');
+    add('  [ ] в схеме есть земля и все обратные провода идут к ней');
+    add('  [ ] у светодиода есть токоограничивающий резистор');
+    add('  [ ] полярные детали (светодиод, диод, электролит, батарея)');
+    add('      включены правильной стороной');
+    add('  [ ] микросхемы получают питание и общий провод');
+    add('  [ ] каждая цепь прослежена от источника до земли');
+    add();
+    rule('=');
+    add(' Конец описания. Дальше идёт просьба человека.');
+    rule('=');
+
+    return L.join('\n');
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  Схема → JSON                                                       */
+  /* ------------------------------------------------------------------ */
+
+  function exportCircuit(circuit, title) {
+    var used = {}, idOf = {};
+    circuit.components.forEach(function (c, i) {
+      var base = c.name || (c.type + (i + 1));
+      var id = base, n = 2;
+      while (used[id]) id = base + '_' + (n++);
+      used[id] = true;
+      idOf[c.id] = id;
+    });
+    var out = {
+      format: FORMAT,
+      title: title || 'Схема',
+      components: circuit.components.map(function (c) {
+        var item = { id: idOf[c.id], type: c.type, x: c.x, y: c.y };
+        if (c.rot) item.rot = c.rot;
+        var props = {}, has = false;
+        c.def().props.forEach(function (p) {
+          if (c.props[p.key] !== p.def) { props[p.key] = c.props[p.key]; has = true; }
+        });
+        if (has) item.props = props;
+        return item;
+      }),
+      wires: circuit.wires.map(function (w) {
+        return {
+          from: idOf[w.a.c], fromPin: w.a.p,
+          to: idOf[w.b.c], toPin: w.b.p,
+          color: w.color
+        };
+      })
+    };
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  JSON → схема                                                       */
+  /* ------------------------------------------------------------------ */
+
+  /** Выдирает JSON из ответа модели: убирает рамки ``` и текст вокруг. */
+  function extractJson(text) {
+    var s = String(text || '').trim();
+    var fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
+    if (fence) s = fence[1].trim();
+    var a = s.indexOf('{'), b = s.lastIndexOf('}');
+    if (a < 0 || b < a) return null;
+    return s.slice(a, b + 1);
+  }
+
+  function parse(text) {
+    var errors = [], warnings = [];
+    var raw = extractJson(text);
+    if (!raw) return { ok: false, errors: ['В тексте не найдено ни одного объекта JSON.'] };
+    var data;
+    try {
+      data = JSON.parse(raw);
+    } catch (e) {
+      return { ok: false, errors: ['JSON разобрать не удалось: ' + e.message] };
+    }
+    if (!data || typeof data !== 'object') {
+      return { ok: false, errors: ['Ожидался объект JSON.'] };
+    }
+    if (data.format && String(data.format).indexOf('electrocore') !== 0) {
+      warnings.push('Поле format = "' + data.format + '", ожидалось "' + FORMAT + '".');
+    }
+    var list = data.components || data.parts;
+    if (!Array.isArray(list) || !list.length) {
+      return { ok: false, errors: ['Нет списка "components" или он пуст.'] };
+    }
+
+    var ct = new EC.Circuit();
+    var byId = {};
+    list.forEach(function (item, i) {
+      var where = 'компонент №' + (i + 1) + (item && item.id ? ' («' + item.id + '»)' : '');
+      if (!item || typeof item !== 'object') { errors.push(where + ': не объект.'); return; }
+      if (!item.type || !EC.defs[item.type]) {
+        errors.push(where + ': неизвестный тип «' + item.type + '».');
+        return;
+      }
+      var id = String(item.id === undefined ? item.type + (i + 1) : item.id);
+      if (byId[id]) { errors.push(where + ': обозначение «' + id + '» уже занято.'); return; }
+      var x = Math.round(Number(item.x) || 0);
+      var y = Math.round(Number(item.y) || 0);
+      var c = ct.add(item.type, x, y);
+      c.name = id;
+      c.rot = ((Math.round(Number(item.rot) || 0)) % 4 + 4) % 4;
+      var props = item.props || item.параметры || {};
+      var def = c.def();
+      for (var k in props) {
+        var pd = null;
+        for (var j = 0; j < def.props.length; j++) if (def.props[j].key === k) pd = def.props[j];
+        if (!pd) { warnings.push(where + ': параметр «' + k + '» этому типу неизвестен, пропущен.'); continue; }
+        var v = props[k];
+        if (pd.type === 'select') {
+          var okv = pd.options.some(function (o) { return o.v === v; });
+          if (!okv) {
+            warnings.push(where + ': значение «' + v + '» недопустимо для «' + k + '», оставлено «' + pd.def + '».');
+            continue;
+          }
+          c.props[k] = v;
+        } else if (pd.type === 'bool') {
+          c.props[k] = !!v;
+        } else if (pd.type === 'code') {
+          c.props[k] = String(v);
+        } else {
+          var num = typeof v === 'number' ? v : U.parseValue(v, NaN);
+          if (!isFinite(num)) {
+            warnings.push(where + ': «' + k + '» не число, оставлено значение по умолчанию.');
+            continue;
+          }
+          if (pd.min !== undefined) num = Math.max(num, pd.min);
+          if (pd.max !== undefined) num = Math.min(num, pd.max);
+          c.props[k] = num;
+        }
+      }
+      if (def.init) def.init(c);
+      byId[id] = c;
+    });
+
+    var wires = data.wires || data.connections || data.соединения || [];
+    if (!Array.isArray(wires)) wires = [];
+    wires.forEach(function (w, i) {
+      var where = 'провод №' + (i + 1);
+      if (!w || typeof w !== 'object') { errors.push(where + ': не объект.'); return; }
+      var a = byId[String(w.from !== undefined ? w.from : w.a)];
+      var b = byId[String(w.to !== undefined ? w.to : w.b)];
+      if (!a) { errors.push(where + ': нет детали «' + w.from + '».'); return; }
+      if (!b) { errors.push(where + ': нет детали «' + w.to + '».'); return; }
+      var pa = Math.round(Number(w.fromPin !== undefined ? w.fromPin : w.aPin) || 0);
+      var pb = Math.round(Number(w.toPin !== undefined ? w.toPin : w.bPin) || 0);
+      if (pa < 0 || pa >= a.pinCount()) {
+        errors.push(where + ': у «' + a.name + '» нет вывода ' + pa +
+          ' (их ' + a.pinCount() + ': 0…' + (a.pinCount() - 1) + ').');
+        return;
+      }
+      if (pb < 0 || pb >= b.pinCount()) {
+        errors.push(where + ': у «' + b.name + '» нет вывода ' + pb +
+          ' (их ' + b.pinCount() + ': 0…' + (b.pinCount() - 1) + ').');
+        return;
+      }
+      var wire = ct.connect(a.id, pa, b.id, pb);
+      if (wire && w.color !== undefined) {
+        var ci = Math.round(Number(w.color));
+        if (isFinite(ci) && ci >= 0) wire.color = ci % EC.WIRE_COLORS.length;
+      }
+    });
+
+    // проверки здравого смысла
+    collectOverlaps(ct).forEach(function (m) { warnings.push(m); });
+    if (!ct.components.some(function (c) { return c.def().isGround; })) {
+      warnings.push('В схеме нет земли: опорный узел выбран автоматически.');
+    }
+    ct.components.forEach(function (c) {
+      var linked = ct.wires.some(function (w) { return w.a.c === c.id || w.b.c === c.id; });
+      if (!linked && c.pinCount() > 0) {
+        warnings.push('«' + c.name + '» ни к чему не подключён.');
+      }
+    });
+
+    ct.reroute();
+    ct.reset();
+    return {
+      ok: errors.length === 0,
+      circuit: ct,
+      title: data.title || data.название || 'Схема',
+      note: data.note || data.пояснение || '',
+      errors: errors,
+      warnings: warnings
+    };
+  }
+
+  /** Ищет детали с пересекающимися габаритами. */
+  function collectOverlaps(ct) {
+    var out = [], cs = ct.components;
+    for (var i = 0; i < cs.length; i++) {
+      for (var j = i + 1; j < cs.length; j++) {
+        var a = cs[i].bounds(), b = cs[j].bounds();
+        if (a.x < b.x + b.w - 0.01 && b.x < a.x + a.w - 0.01 &&
+          a.y < b.y + b.h - 0.01 && b.y < a.y + a.h - 0.01) {
+          out.push('«' + cs[i].name + '» и «' + cs[j].name + '» перекрываются — раздвиньте их.');
+          if (out.length >= 8) return out;
+        }
+      }
+    }
+    return out;
+  }
+
+  EC.aiPrompt = {
+    FORMAT: FORMAT,
+    MM_PER_CELL: MM_PER_CELL,
+    build: build,
+    parse: parse,
+    export: exportCircuit,
+    footprint: footprint
+  };
+})(window);
