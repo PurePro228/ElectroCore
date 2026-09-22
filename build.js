@@ -11,7 +11,7 @@ const path = require('path');
 
 const ROOT = __dirname;
 const OUT = process.argv[2] || path.join(ROOT, 'ElectroCore.html');
-const MODULES = ['util', 'solver', 'components', 'circuit', 'render', 'skins', 'scope', 'examples', 'app'];
+const MODULES = ['util', 'solver', 'cpu', 'components', 'circuit', 'render', 'skins', 'scope', 'examples', 'app'];
 
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 

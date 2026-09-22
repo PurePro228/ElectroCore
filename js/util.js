@@ -18,7 +18,7 @@
     var sign = value < 0 ? '-' : '';
     var v = Math.abs(value);
     if (v === 0) return '0';
-    if (v < 1e-15) return sign + v.toExponential(2);
+    if (v < 1e-15) return '0';                 // ниже фемто показывать нечего
     var p = PREFIXES[PREFIXES.length - 1];
     for (var i = 0; i < PREFIXES.length; i++) {
       if (v >= Math.pow(10, PREFIXES[i].e)) { p = PREFIXES[i]; break; }

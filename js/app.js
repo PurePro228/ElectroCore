@@ -347,6 +347,7 @@
       var sk = e.target.getAttribute && e.target.getAttribute('data-skin');
       if (sk) applySkin(sk);
     });
+    buildIsaTable();
     $('helpClose').addEventListener('click', function () { $('helpModal').hidden = true; });
     $('helpModal').addEventListener('click', function (e) {
       if (e.target === $('helpModal')) $('helpModal').hidden = true;
@@ -366,6 +367,18 @@
       $('speedVal').textContent = formatSpeed(state.speed);
     });
     $('fileInput').addEventListener('change', importFile);
+  }
+
+  /** Справочная таблица команд процессора — строится из его же описания. */
+  function buildIsaTable() {
+    var host = $('isaTable');
+    if (!host || !EC.cpu) return;
+    var html = '';
+    EC.cpu.ISA.forEach(function (d) {
+      var operand = d.arg === 'n' ? ' число' : (d.arg === 'a' ? ' адрес' : '');
+      html += '<tr><td>' + d.m + operand + '</td><td>' + d.t + '</td></tr>';
+    });
+    host.innerHTML = html;
   }
 
   function formatSpeed(s) {
@@ -923,7 +936,8 @@
     var rd = U.el('div', { class: 'readouts' });
     rd.id = 'liveReadouts';
     ms.appendChild(rd);
-    if (def.key === 'npn' || def.key === 'pnp' || def.key === 'nmos' || def.key === 'pmos') {
+    if (def.key === 'npn' || def.key === 'pnp' || def.key === 'nmos' ||
+      def.key === 'pmos' || def.key === 'cpu8') {
       ms.appendChild(U.el('div', { class: 'insp-tip', id: 'liveExtra' }));
     }
     body.appendChild(ms);
@@ -932,6 +946,12 @@
     /* действия */
     var as = U.el('div', { class: 'insp-section' });
     var acts2 = U.el('div', { class: 'insp-actions' });
+    if (def.key === 'cpu8') {
+      acts2.appendChild(actionBtn('Перезапустить', function () {
+        if (def.init) def.init(c);
+        toast('Процессор перезапущен');
+      }));
+    }
     acts2.appendChild(actionBtn('Повернуть', rotateSelection));
     acts2.appendChild(actionBtn('Дублировать', duplicateSelection));
     acts2.appendChild(actionBtn('На график', function () {
@@ -986,6 +1006,33 @@
     }
 
     f.appendChild(U.el('label', { for: id, text: p.label + (p.unit ? ', ' + p.unit : '') }));
+
+    if (p.type === 'code') {
+      var ta = U.el('textarea', { class: 'code-edit', id: id, spellcheck: 'false' });
+      ta.value = c.props[p.key] || '';
+      var err = U.el('div', { class: 'code-err' });
+      function assembleNow() {
+        var res = EC.cpu.assemble(ta.value);
+        if (res.ok) {
+          err.className = 'code-err ok';
+          err.textContent = 'Собрано: ' + res.size + ' байт';
+        } else {
+          err.className = 'code-err bad';
+          err.textContent = 'Строка ' + res.errors[0].line + ': ' + res.errors[0].msg;
+        }
+      }
+      ta.addEventListener('input', assembleNow);
+      ta.addEventListener('change', function () {
+        pushUndo();
+        c.props[p.key] = ta.value;
+        if (c.def().init) c.def().init(c);      // перезапуск с новой программой
+        assembleNow();
+      });
+      assembleNow();
+      f.appendChild(ta);
+      f.appendChild(err);
+      return f;
+    }
 
     if (p.type === 'select') {
       var sel = U.el('select', { id: id });
@@ -1056,6 +1103,13 @@
         { k: 'Iк', v: U.fmtSI(c.ic || 0, 3) + 'А', cls: 'amber' },
         { k: 'Uкэ', v: U.fmtSI(c.vce || 0, 3) + 'В', cls: 'blue' }
       ];
+    } else if (def.key === 'cpu8') {
+      var mach = c.state && c.state.m;
+      rows = mach ? [
+        { k: 'A', v: EC.cpu.hex(mach.a) },
+        { k: 'B', v: EC.cpu.hex(mach.b), cls: 'amber' },
+        { k: 'PC', v: EC.cpu.hex(mach.pc), cls: 'blue' }
+      ] : [{ k: '—', v: '—' }];
     } else if (def.key === 'opamp') {
       rows = [
         { k: 'Uвх', v: U.fmtSI(c.vin || 0, 3) + 'В' },
@@ -1082,7 +1136,16 @@
       for (var i = 0; i < rows.length; i++) cells[i].children[1].textContent = rows[i].v;
     }
     var extra = $('liveExtra');
-    if (extra) extra.textContent = 'Режим: ' + (c.mode || '—');
+    if (!extra) return;
+    if (def.key === 'cpu8') {
+      var mm = c.state && c.state.m;
+      if (!mm) { extra.textContent = ''; return; }
+      var flags = (mm.z ? 'Z' : '·') + (mm.c ? 'C' : '·');
+      var where = c.inReset ? 'сброс' : (mm.halted ? 'остановлен' : EC.cpu.disassemble(mm.mem, mm.pc).text);
+      extra.textContent = 'Флаги ' + flags + ' · такт ' + mm.cycles + ' · ' + where;
+    } else {
+      extra.textContent = 'Режим: ' + (c.mode || '—');
+    }
   }
 
   /* ================================================================== */

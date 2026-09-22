@@ -1189,6 +1189,34 @@
   real.and_gate = function (g, c) { logicChip(g, c, '&', 2); };
   real.or_gate = function (g, c) { logicChip(g, c, '≥1', 2); };
 
+  real.cpu8 = function (g, c) {
+    // процессор в корпусе DIP-8
+    var w = GRID * 3.4, h = GRID * 7;
+    for (var i = 0; i < 4; i++) {
+      var y = (-3 + i * 2) * GRID;
+      lead(g, -3 * GRID, y, -w / 2, y, 2.4);
+      lead(g, 3 * GRID, y, w / 2, y, 2.4);
+    }
+    shadowUnder(g, w, h);
+    g.fillStyle = grad(g, 'dipBody', 0, -h / 2, 0, h / 2, [
+      [0, '#40464f'], [0.18, '#272c33'], [0.72, '#191d23'], [1, '#0d1013']
+    ]);
+    roundRect(g, -w / 2, -h / 2, w, h, 2); g.fill();
+    g.fillStyle = 'rgba(8,10,13,.9)';
+    g.beginPath(); g.arc(0, -h / 2, w * 0.11, 0, Math.PI); g.fill();
+    g.fillStyle = 'rgba(190,200,212,.6)';
+    g.beginPath(); g.arc(-w * 0.36, -h * 0.41, 1.9, 0, 7); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.06)';
+    roundRect(g, -w / 2 + 1.5, -h / 2 + 1.5, w - 3, h * 0.06, 1.5); g.fill();
+    gfx.chipPins(g, c, EC.CPU_PINS, w, 5.4);
+    EC.cpuFace(g, c, w, h);
+    if (c.powered && c.state && c.state.m && !c.state.m.halted && !c.inReset) {
+      g.strokeStyle = 'rgba(125,255,208,.45)'; g.lineWidth = 1.2;
+      roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
+    }
+    label(g, c, [c.name || 'EC-8'], GRID * 4.2);
+  };
+
   real.ne555 = function (g, c) {
     // микросхема DIP-8 с настоящей нумерацией выводов
     var w = GRID * 3.2, h = GRID * 7;

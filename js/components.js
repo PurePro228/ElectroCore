@@ -948,7 +948,11 @@
     var vt = ctx.vt * o.nf;
     var vcrit = SOL.critVoltage(o.is, vt);
     var prev = c[key] === undefined ? 0 : c[key];
-    var vd = SOL.pnjlim(ctx.nv(a) - ctx.nv(b), prev, vt, vcrit);
+    var raw = ctx.nv(a) - ctx.nv(b);
+    var vd = SOL.pnjlim(raw, prev, vt, vcrit);
+    // пока ограничитель шага правит напряжение, решение ещё не найдено:
+    // узловые потенциалы при этом могут не меняться, поэтому просим ещё итерацию
+    if (Math.abs(vd - raw) > 1e-9) ctx.forceIterate();
     if (o.vz > 0) {                            // симметричное ограничение шага в пробое
       var lo = -o.vz - 1.5;
       if (vd < lo && prev > lo) vd = lo;
@@ -1130,8 +1134,10 @@
 
         var vbe = pol * (ctx.nv(c.n[0]) - ctx.nv(c.n[2]));
         var vbc = pol * (ctx.nv(c.n[0]) - ctx.nv(c.n[1]));
+        var rawBe = vbe, rawBc = vbc;
         vbe = SOL.pnjlim(vbe, c._vbe === undefined ? 0 : c._vbe, vt, vcrit);
         vbc = SOL.pnjlim(vbc, c._vbc === undefined ? 0 : c._vbc, vt, vcrit);
+        if (Math.abs(vbe - rawBe) > 1e-9 || Math.abs(vbc - rawBc) > 1e-9) ctx.forceIterate();
         c._vbe = vbe; c._vbc = vbc;
 
         var ebe = SOL.safeExp(U.clamp(vbe / vt, -60, 90));
@@ -2112,8 +2118,8 @@
       m.conductance(DIS, GND, q ? 1e-11 : 1 / Math.max(c.props.Rdis, 0.1));
     },
     post: function (c, ctx) {
-      var vg = ctx.nv(c.n[0]);
-      var vcc = ctx.nv(c.n[7]) - vg;
+      var vg = ctx.nv(c.n[0]);                 // вывод 1 — общий
+      var vcc = ctx.nv(c.n[7]) - vg;           // вывод 8 — питание
       var vUp = ctx.nv(c.n[4]) - vg;           // верхний порог — вывод 5
       var vLow = ctx.nv(c.ni[0]) - vg;         // нижний порог — половина верхнего
       var q = c.state.q;
@@ -2186,4 +2192,233 @@
   EC.categories.sort(function (a, b) {
     return ORDER.indexOf(a.key) - ORDER.indexOf(b.key);
   });
+})(window);
+
+/* ElectroCore — восьмибитный процессор EC-8 в корпусе DIP-8. */
+(function (global) {
+  'use strict';
+  var EC = global.EC, U = EC.util;
+  var GRID = EC.GRID, define = EC.define;
+  var gfx = EC.gfx, roundRect = gfx.roundRect, lead = gfx.lead, label = gfx.label;
+
+  /* Выводы корпуса: индекс, сокращение, номер ножки. */
+  var CPU_PINS = [
+    { i: 0, t: 'Vcc', n: 1 }, { i: 1, t: 'CLK', n: 2 },
+    { i: 2, t: 'СБР', n: 3 }, { i: 3, t: 'GND', n: 4 },
+    { i: 4, t: 'P0', n: 5 }, { i: 5, t: 'P1', n: 6 },
+    { i: 6, t: 'P2', n: 7 }, { i: 7, t: 'P3', n: 8 }
+  ];
+  EC.CPU_PINS = CPU_PINS;
+
+  var PIN_VCC = 0, PIN_CLK = 1, PIN_RST = 2, PIN_GND = 3;
+  var PORT_PIN = [4, 5, 6, 7];                 // линия порта → индекс вывода
+
+  var DEFAULT_CODE = [
+    '; Мигает светодиодом на выводе P0.',
+    '; Задержка сделана двумя вложенными циклами.',
+    '',
+    '        LDI 0b1111      ; все четыре линии',
+    '        DIR             ; настроить как выходы',
+    '',
+    'цикл:   LDI 0b0001      ; P0 = 1',
+    '        OUT',
+    '        CALL пауза',
+    '        LDI 0b0000      ; P0 = 0',
+    '        OUT',
+    '        CALL пауза',
+    '        JMP цикл',
+    '',
+    'пауза:  LDI 10          ; внешний счётчик',
+    '        ST 0xF0',
+    'внеш:   LDI 25          ; внутренний счётчик',
+    '        ST 0xF1',
+    'внутр:  LD 0xF1',
+    '        DEC',
+    '        ST 0xF1',
+    '        JNZ внутр',
+    '        LD 0xF0',
+    '        DEC',
+    '        ST 0xF0',
+    '        JNZ внеш',
+    '        RET'
+  ].join('\n');
+
+  var CLOCK_SRC = [
+    { v: 'internal', t: 'встроенный' },
+    { v: 'external', t: 'с вывода CLK' }
+  ];
+
+  /** Пересобирает программу, если текст изменился. */
+  function syncCode(c) {
+    if (c._codeText === c.props.code && c.state.asm) return;
+    c._codeText = c.props.code;
+    var res = EC.cpu.assemble(c.props.code);
+    c.state.asm = res;
+    if (res.ok) EC.cpu.load(c.state.m, res.code);
+    c.asmError = res.ok ? null : res.errors[0];
+  }
+
+  define({
+    key: 'cpu8', name: 'Процессор EC-8', cat: 'logic',
+    tip: 'Восьмибитный процессор с памятью на 256 байт и четырьмя линиями ввода-вывода. Программа пишется на ассемблере в свойствах.',
+    pins: [
+      { x: -3, y: -3, name: '1 Vcc' },
+      { x: -3, y: -1, name: '2 CLK' },
+      { x: -3, y: 1, name: '3 СБР' },
+      { x: -3, y: 3, name: '4 GND' },
+      { x: 3, y: 3, name: '5 P0' },
+      { x: 3, y: 1, name: '6 P1' },
+      { x: 3, y: -1, name: '7 P2' },
+      { x: 3, y: -3, name: '8 P3' }
+    ],
+    props: [
+      { key: 'code', label: 'Программа', type: 'code', def: DEFAULT_CODE },
+      { key: 'clkSrc', label: 'Тактирование', type: 'select', options: CLOCK_SRC, def: 'internal' },
+      { key: 'freq', label: 'Тактовая частота', unit: 'Гц', def: 2000, min: 1, max: 200000 },
+      { key: 'Rout', label: 'Сопр. выхода', unit: 'Ω', def: 40, min: 1 },
+      { key: 'Rin', label: 'Подтяжка входа', unit: 'Ω', def: 1e6, min: 1000 }
+    ],
+    init: function (c) {
+      c.state = { m: EC.cpu.create(), asm: null, clkHigh: false, acc: 0 };
+      c._codeText = null;
+      syncCode(c);
+    },
+    stamp: function (c, ctx) {
+      var m = ctx.mna, st = c.state;
+      var VCC = c.n[PIN_VCC], CLK = c.n[PIN_CLK], RST = c.n[PIN_RST], GND = c.n[PIN_GND];
+      var Rin = Math.max(c.props.Rin, 1000);
+      m.conductance(VCC, GND, 1 / 5000);       // потребление ядра
+      m.conductance(RST, VCC, 1 / 100000);     // вход сброса подтянут к питанию
+      m.conductance(CLK, GND, 1 / Rin);
+      var powered = c.powered;
+      for (var k = 0; k < 4; k++) {
+        var p = c.n[PORT_PIN[k]];
+        var out = powered && ((st.m.ddr >> k) & 1);
+        if (out) {
+          var high = (st.m.port >> k) & 1;
+          m.conductance(p, high ? VCC : GND, 1 / Math.max(c.props.Rout, 1));
+          m.conductance(p, high ? GND : VCC, 1e-11);
+        } else {
+          m.conductance(p, GND, 1 / Rin);      // вход: слабая подтяжка к нулю
+        }
+      }
+    },
+    post: function (c, ctx) {
+      syncCode(c);
+      var st = c.state, mach = st.m;
+      var vg = ctx.nv(c.n[PIN_GND]);
+      var vcc = ctx.nv(c.n[PIN_VCC]) - vg;
+      c.vcc = vcc;
+      c.powered = vcc > 2;
+
+      if (!c.powered) {
+        EC.cpu.reset(mach);
+        c.inReset = false;
+        c.pinI = [0, 0, 0, 0, 0, 0, 0, 0];
+        c.v = 0; c.i = 0;
+        c.warn = null;
+        return;
+      }
+
+      // вход сброса активен низким уровнем
+      c.inReset = (ctx.nv(c.n[PIN_RST]) - vg) < vcc * 0.3;
+      if (c.inReset) EC.cpu.reset(mach);
+
+      // состояние линий, настроенных на вход
+      var pins = 0, k;
+      for (k = 0; k < 4; k++) {
+        if ((ctx.nv(c.n[PORT_PIN[k]]) - vg) > vcc * 0.5) pins |= (1 << k);
+      }
+      mach.pins = pins;
+
+      if (!c.inReset && st.asm && st.asm.ok) {
+        if (c.props.clkSrc === 'external') {
+          var high = (ctx.nv(c.n[PIN_CLK]) - vg) > vcc * 0.5;
+          if (high && !st.clkHigh) EC.cpu.step(mach);   // по фронту
+          st.clkHigh = high;
+        } else {
+          st.acc += Math.max(c.props.freq, 1) * ctx.dt;
+          var n = Math.floor(st.acc);
+          if (n > 4000) n = 4000;                       // не вешаем кадр
+          st.acc -= n;
+          for (k = 0; k < n; k++) EC.cpu.step(mach);
+        }
+      }
+
+      // токи выводов
+      var Rout = Math.max(c.props.Rout, 1), Rin = Math.max(c.props.Rin, 1000);
+      var iCore = vcc / 5000;
+      var iRst = (ctx.nv(c.n[PIN_RST]) - ctx.nv(c.n[PIN_VCC])) / 100000;
+      var iClk = (ctx.nv(c.n[PIN_CLK]) - vg) / Rin;
+      var pinI = [0, iClk, iRst, 0, 0, 0, 0, 0];
+      var fromVcc = 0;
+      for (k = 0; k < 4; k++) {
+        var idx = PORT_PIN[k];
+        var vp = ctx.nv(c.n[idx]) - vg;
+        if ((mach.ddr >> k) & 1) {
+          var hi = (mach.port >> k) & 1;
+          var ip = (vp - (hi ? vcc : 0)) / Rout;
+          pinI[idx] = ip;
+          if (hi) fromVcc += ip;
+        } else {
+          pinI[idx] = vp / Rin;
+        }
+      }
+      pinI[PIN_VCC] = iCore - iRst + fromVcc;
+      var sum = 0;
+      for (k = 0; k < 8; k++) if (k !== PIN_GND) sum += pinI[k];
+      pinI[PIN_GND] = -sum;
+      c.pinI = pinI;
+      c.v = vcc;
+      c.i = iCore;
+      c.warn = (st.asm && !st.asm.ok)
+        ? 'Ошибка в программе, строка ' + st.asm.errors[0].line + ': ' + st.asm.errors[0].msg
+        : (mach.halted ? null : null);
+    },
+    draw: function (g, c) {
+      var w = GRID * 3.4, h = GRID * 7;
+      for (var i = 0; i < 4; i++) {
+        var y = (-3 + i * 2) * GRID;
+        lead(g, -3 * GRID, y, -w / 2, y);
+        lead(g, 3 * GRID, y, w / 2, y);
+      }
+      g.fillStyle = 'rgba(34,40,50,.96)';
+      roundRect(g, -w / 2, -h / 2, w, h, 3); g.fill();
+      g.strokeStyle = c.powered ? 'rgba(125,255,208,.7)' : 'rgba(170,190,210,.6)';
+      g.lineWidth = 1.3;
+      roundRect(g, -w / 2, -h / 2, w, h, 3); g.stroke();
+      gfx.chipPins(g, c, CPU_PINS, w);
+      EC.cpuFace(g, c, w, h);
+      label(g, c, [c.name || 'EC-8'], GRID * 4.2);
+    }
+  });
+
+  /**
+   * Лицевая часть корпуса: маркировка, счётчик команд и четыре точки,
+   * показывающие уровни на линиях порта.
+   */
+  EC.cpuFace = function (g, c, w, h) {
+    var st = c.state, mach = st && st.m;
+    g.save();
+    g.rotate(-(c.rot || 0) * Math.PI / 2);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '700 9px ui-monospace, Menlo, monospace';
+    g.fillStyle = 'rgba(232,240,248,.85)';
+    g.fillText('EC-8', 0, -GRID * 1.05);
+    if (mach) {
+      g.font = '600 6.5px ui-monospace, Menlo, monospace';
+      g.fillStyle = c.inReset ? 'rgba(255,170,120,.9)'
+        : (mach.halted ? 'rgba(255,200,120,.85)' : 'rgba(125,255,208,.8)');
+      g.fillText(c.inReset ? 'СБРОС' : (mach.halted ? 'СТОП' : 'PC ' + EC.cpu.hex(mach.pc)), 0, 0);
+      for (var k = 0; k < 4; k++) {
+        var on = c.powered && ((mach.ddr >> k) & 1) && ((mach.port >> k) & 1);
+        g.beginPath();
+        g.arc(-GRID * 0.75 + k * GRID * 0.5, GRID * 1.15, 2.6, 0, 7);
+        g.fillStyle = on ? '#7dffd0' : 'rgba(120,140,160,.45)';
+        g.fill();
+      }
+    }
+    g.restore();
+  };
 })(window);

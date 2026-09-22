@@ -32,7 +32,7 @@
     voltmeter: 'PV', ammeter: 'PA', wattmeter: 'PW', probe: 'X', ground: '', junction: '',
     thermistor: 'RK', photoresistor: 'RL', transformer: 'TV', schottky: 'VD', bridge: 'VD',
     regulator: 'DA', motor: 'M', buzzer: 'HA',
-    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD'
+    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD', cpu8: 'DD'
   };
 
   /* ------------------------------------------------------------------ */

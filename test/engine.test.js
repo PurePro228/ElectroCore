@@ -4,7 +4,7 @@
 'use strict';
 const path = require('path');
 global.window = {};
-['util', 'solver', 'components', 'circuit'].forEach(function (m) {
+['util', 'solver', 'cpu', 'components', 'circuit'].forEach(function (m) {
   require(path.join(__dirname, '..', 'js', m + '.js'));
 });
 const EC = global.window.EC;
@@ -739,6 +739,200 @@ test('Таймер 555: восемь выводов и автоколебани�
   const f1 = measure(200000);
   check('порог с вывода 5 задан внешне', Math.abs(t.vcc) > 1 ? 1 : 0, 1, 0);
   check('при пороге 3 В вместо 6 В частота выросла', f1 > f0 * 1.3 ? 1 : 0, 1, 0);
+});
+
+test('Ассемблер процессора EC-8', function () {
+  const A = EC.cpu.assemble;
+  let r = A('LDI 5\nOUT\nHLT');
+  check('простая программа собирается', r.ok ? 1 : 0, 1, 0);
+  check('размер в байтах', r.size, 4, 0);      // LDI 2 + OUT 1 + HLT 1
+  check('код первой команды', r.code[0], 0x01, 0);
+  check('операнд первой команды', r.code[1], 5, 0);
+
+  r = A('старт:  LDI 0xFF\n        JMP старт');
+  check('метка разрешается в адрес', r.code[3], 0, 0);
+  check('метка запомнена', r.labels['старт'], 0, 0);
+
+  r = A('LDI 0b1010');
+  check('двоичный литерал', r.code[1], 10, 0);
+  r = A('LDI $2A');
+  check('шестнадцатеричный литерал через доллар', r.code[1], 42, 0);
+
+  r = A('ПРЫГ 5');
+  check('неизвестная команда — ошибка', r.ok ? 0 : 1, 1, 0);
+  r = A('LDI');
+  check('пропущенный операнд — ошибка', r.ok ? 0 : 1, 1, 0);
+  r = A('JMP нетмет');
+  check('ссылка на несуществующую метку — ошибка', r.ok ? 0 : 1, 1, 0);
+  r = A('; только комментарий\n\n   ');
+  check('пустая программа допустима', r.ok ? 1 : 0, 1, 0);
+});
+
+test('Арифметика и флаги процессора', function () {
+  function run(src, steps) {
+    const r = EC.cpu.assemble(src);
+    if (!r.ok) throw new Error(r.errors[0].msg);
+    const m = EC.cpu.create();
+    EC.cpu.load(m, r.code);
+    for (let i = 0; i < (steps || 40) && !m.halted; i++) EC.cpu.step(m);
+    return m;
+  }
+  let m = run('LDI 200\nTAB\nLDI 100\nADD\nHLT');
+  check('200 + 100 = 44 с переносом', m.a, 44, 0);
+  check('флаг переноса поднят', m.c ? 1 : 0, 1, 0);
+
+  m = run('LDI 10\nTAB\nLDI 10\nSUB\nHLT');
+  check('10 − 10 = 0', m.a, 0, 0);
+  check('флаг нуля поднят', m.z ? 1 : 0, 1, 0);
+  check('заёма нет', m.c ? 0 : 1, 1, 0);
+
+  m = run('LDI 5\nTAB\nLDI 3\nSUB\nHLT');
+  check('3 − 5 даёт заём', m.c ? 1 : 0, 1, 0);
+  check('результат по модулю 256', m.a, 254, 0);
+
+  m = run('LDI 0b10000001\nSHL\nHLT');
+  check('сдвиг влево', m.a, 2, 0);
+  check('старший бит ушёл в перенос', m.c ? 1 : 0, 1, 0);
+
+  m = run('LDI 0b11110000\nANDI 0b00110011\nHLT');
+  check('побитное И', m.a, 0b00110000, 0);
+
+  m = run('LDI 7\nCMPI 7\nHLT');
+  check('сравнение равных даёт ноль', m.z ? 1 : 0, 1, 0);
+  check('сравнение не меняет A', m.a, 7, 0);
+});
+
+test('Подпрограммы и память процессора', function () {
+  const src = [
+    '        LDI 3',
+    '        ST 0x80',
+    '        CALL удвоить',
+    '        CALL удвоить',
+    '        HLT',
+    'удвоить: LD 0x80',
+    '        TAB',
+    '        ADD',
+    '        ST 0x80',
+    '        RET'
+  ].join('\n');
+  const r = EC.cpu.assemble(src);
+  check('программа с подпрограммой собирается', r.ok ? 1 : 0, 1, 0);
+  const m = EC.cpu.create();
+  EC.cpu.load(m, r.code);
+  for (let i = 0; i < 100 && !m.halted; i++) EC.cpu.step(m);
+  check('процессор остановился', m.halted ? 1 : 0, 1, 0);
+  check('3 удвоено дважды = 12', m.mem[0x80], 12, 0);
+  check('стек вернулся на место', m.sp, 0xFF, 0);
+});
+
+test('Процессор в схеме: мигает светодиодом', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -20, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -20, 14);
+  const cpu = ct.add('cpu8', 0, 0);
+  const r = ct.add('resistor', 12, 6); r.props.R = 330;
+  const led = ct.add('led', 26, 6);
+  ct.connect(bat.id, 0, cpu.id, 0);          // Vcc
+  ct.connect(cpu.id, 3, gnd.id, 0);          // GND
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(cpu.id, 4, r.id, 0);            // P0 → резистор → светодиод
+  ct.connect(r.id, 1, led.id, 0);
+  ct.connect(led.id, 1, gnd.id, 0);
+  ct.reset();
+
+  let flips = 0, prev = null, peak = 0, lit = 0, total = 0;
+  for (let i = 0; i < 40000; i++) {
+    ct.step(5e-4);
+    const on = led.i > 0.003;
+    if (prev !== null && on !== prev) flips++;
+    prev = on;
+    peak = Math.max(peak, led.i);
+    if (on) lit++;
+    total++;
+  }
+  check('питание дошло до процессора', cpu.vcc, 5, 0.05);
+  check('светодиод переключался', flips > 10 ? 1 : 0, 1, 0);
+  check('ток открытого выхода (5−Uд)/(Rвых+R)', peak, (5 - 1.9) / (40 + 330), 2e-3);
+  check('скважность около половины', Math.abs(lit / total - 0.5) < 0.1 ? 1 : 0, 1, 0);
+});
+
+test('Процессор читает вход и управляет выходом', function () {
+  const src = [
+    '        LDI 0b0001',
+    '        DIR             ; P0 выход, остальные входы',
+    'цикл:   IN',
+    '        ANDI 0b0010     ; смотрим P1',
+    '        JZ выкл',
+    '        LDI 0b0001',
+    '        OUT',
+    '        JMP цикл',
+    'выкл:   LDI 0b0000',
+    '        OUT',
+    '        JMP цикл'
+  ].join('\n');
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -20, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -20, 14);
+  const cpu = ct.add('cpu8', 0, 0); cpu.props.code = src;
+  const src1 = ct.add('vsource', -20, 22);
+  src1.props.wave = 'dc'; src1.props.amp = 0; src1.props.Rint = 100;
+  const v = ct.add('voltmeter', 16, 6);
+  ct.connect(bat.id, 0, cpu.id, 0);
+  ct.connect(cpu.id, 3, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(cpu.id, 5, src1.id, 0);         // P1 — вход
+  ct.connect(src1.id, 1, gnd.id, 0);
+  ct.connect(cpu.id, 4, v.id, 0);            // P0 — выход
+  ct.connect(v.id, 1, gnd.id, 0);
+  ct.reset();
+
+  run(ct, 0.2, 5e-4);
+  check('на входе ноль — выход низкий', v.reading < 0.5 ? 1 : 0, 1, 0);
+  src1.props.amp = 5;
+  run(ct, 0.2, 5e-4);
+  check('на входе питание — выход высокий', v.reading > 4 ? 1 : 0, 1, 0);
+  src1.props.amp = 0;
+  run(ct, 0.2, 5e-4);
+  check('вход снят — выход снова низкий', v.reading < 0.5 ? 1 : 0, 1, 0);
+});
+
+test('Вывод сброса и внешнее тактирование', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -20, 0); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -20, 16);
+  const cpu = ct.add('cpu8', 0, 0);
+  cpu.props.code = 'счёт:   INC\n        JMP счёт';
+  cpu.props.clkSrc = 'external';
+  const clk = ct.add('vsource', -20, 24);
+  clk.props.wave = 'square'; clk.props.amp = 2.5; clk.props.offset = 2.5;
+  clk.props.freq = 200; clk.props.Rint = 50;
+  const rst = ct.add('vsource', -20, 32);
+  rst.props.wave = 'dc'; rst.props.amp = 5; rst.props.Rint = 100;
+  ct.connect(bat.id, 0, cpu.id, 0);
+  ct.connect(cpu.id, 3, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(cpu.id, 1, clk.id, 0);
+  ct.connect(clk.id, 1, gnd.id, 0);
+  ct.connect(cpu.id, 2, rst.id, 0);
+  ct.connect(rst.id, 1, gnd.id, 0);
+  ct.reset();
+
+  run(ct, 1.0, 2e-4);
+  const c1 = cpu.state.m.cycles;
+  check('за секунду прошло ~200 тактов внешнего генератора', c1, 200, 12);
+  check('в сбросе не находится', cpu.inReset ? 0 : 1, 1, 0);
+
+  rst.props.amp = 0;                          // прижали вывод сброса к нулю
+  run(ct, 0.3, 2e-4);
+  check('сброс распознан', cpu.inReset ? 1 : 0, 1, 0);
+  check('счётчик команд обнулён', cpu.state.m.pc, 0, 0);
+  const c2 = cpu.state.m.cycles;
+  run(ct, 0.3, 2e-4);
+  check('в сбросе команды не выполняются', cpu.state.m.cycles, c2, 0);
+
+  rst.props.amp = 5;
+  run(ct, 0.5, 2e-4);
+  check('после снятия сброса счёт возобновился', cpu.state.m.cycles > 50 ? 1 : 0, 1, 0);
 });
 
 console.log('\n' + '─'.repeat(50));
