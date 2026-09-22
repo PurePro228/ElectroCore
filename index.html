@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d131b">
+<meta name="description" content="ElectroCore — симулятор электронных схем: резисторы, конденсаторы, транзисторы, измерения тока, напряжения и мощности по законам физики.">
+<title>ElectroCore — симулятор электроники</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⚡</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ======================= Верхняя панель ======================= -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="bolt">⚡</span>
+      <span class="brand-text">Electro<b>Core</b></span>
+    </div>
+
+    <div class="tool-group transport">
+      <button id="btnRun" class="btn primary" title="Пуск / пауза (пробел)">
+        <span class="ico" id="runIco">▶</span><span class="lbl" id="runLbl">Пуск</span>
+      </button>
+      <button id="btnStep" class="btn" title="Один шаг">⏭<span class="lbl">Шаг</span></button>
+      <button id="btnReset" class="btn" title="Сбросить состояние">↺<span class="lbl">Сброс</span></button>
+    </div>
+
+    <div class="tool-group modes" role="group" aria-label="Инструмент">
+      <button class="btn mode active" data-mode="select" title="Выбор и перемещение (V)">✥<span class="lbl">Выбор</span></button>
+      <button class="btn mode" data-mode="wire" title="Провод (W)">⁄<span class="lbl">Провод</span></button>
+      <button class="btn mode" data-mode="erase" title="Удаление (E)">⌫<span class="lbl">Стереть</span></button>
+    </div>
+
+    <div class="tool-group edit">
+      <button id="btnUndo" class="btn" title="Отменить (Ctrl+Z)">↶</button>
+      <button id="btnRedo" class="btn" title="Повторить (Ctrl+Y)">↷</button>
+      <button id="btnRotate" class="btn" title="Повернуть (R)">⟳</button>
+      <button id="btnDelete" class="btn" title="Удалить (Del)">🗑</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="tool-group right-group">
+      <select id="exampleSelect" class="select" title="Готовые схемы">
+        <option value="">Примеры схем…</option>
+      </select>
+      <button id="btnFit" class="btn" title="Вписать в экран">⤢</button>
+      <button id="btnMenu" class="btn" title="Файл и настройки">☰</button>
+    </div>
+  </header>
+
+  <!-- ========================= Рабочая зона ======================== -->
+  <main class="workspace">
+
+    <!-- Палитра компонентов -->
+    <aside id="palette" class="panel palette">
+      <div class="panel-head">
+        <span>Компоненты</span>
+        <button class="icon-btn sheet-close" data-close="palette">✕</button>
+      </div>
+      <div class="panel-body" id="paletteBody"></div>
+    </aside>
+
+    <!-- Холст -->
+    <section class="stage">
+      <canvas id="board" aria-label="Рабочий стол схемы"></canvas>
+
+      <div class="hud" id="hud">
+        <div class="hud-row"><span class="k">Время</span><span class="v" id="hudTime">0 с</span></div>
+        <div class="hud-row"><span class="k">Шаг</span><span class="v" id="hudDt">50 мкс</span></div>
+        <div class="hud-row"><span class="k">Узлов</span><span class="v" id="hudNodes">0</span></div>
+        <div class="hud-row"><span class="k">Итераций</span><span class="v" id="hudIter">0</span></div>
+      </div>
+
+      <div class="alerts" id="alerts"></div>
+
+      <div class="zoom-controls">
+        <button class="icon-btn" id="btnZoomIn" title="Приблизить">＋</button>
+        <button class="icon-btn" id="btnZoomOut" title="Отдалить">−</button>
+      </div>
+
+      <div class="empty-hint" id="emptyHint">
+        <div class="eh-card">
+          <h2>Соберите свою первую схему</h2>
+          <p>Выберите элемент слева и коснитесь рабочего стола. Тяните от вывода элемента, чтобы протянуть провод.</p>
+          <p class="muted">Или откройте готовый пример в меню сверху.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Инспектор -->
+    <aside id="inspector" class="panel inspector">
+      <div class="panel-head">
+        <span id="inspTitle">Свойства</span>
+        <button class="icon-btn sheet-close" data-close="inspector">✕</button>
+      </div>
+      <div class="panel-body" id="inspectorBody">
+        <p class="placeholder">Выберите элемент, чтобы изменить параметры и увидеть измерения.</p>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ========================= Осциллограф ========================= -->
+  <section id="scopePanel" class="scope collapsed">
+    <div class="scope-head">
+      <button id="btnScopeToggle" class="scope-title">
+        <span class="chev">▲</span> Осциллограф
+      </button>
+      <div class="scope-chips" id="scopeChips"></div>
+      <div class="scope-ctl">
+        <label class="mini">Развёртка
+          <select id="scopeTime" class="select mini-select">
+            <option value="0.0002">0,2 мс</option>
+            <option value="0.001">1 мс</option>
+            <option value="0.005">5 мс</option>
+            <option value="0.02">20 мс</option>
+            <option value="0.05" selected>50 мс</option>
+            <option value="0.2">200 мс</option>
+            <option value="1">1 с</option>
+            <option value="5">5 с</option>
+          </select>
+        </label>
+        <button id="btnScopeClear" class="btn tiny">Очистить</button>
+      </div>
+    </div>
+    <div class="scope-body">
+      <canvas id="scopeCanvas"></canvas>
+      <div class="scope-stats" id="scopeStats"></div>
+    </div>
+  </section>
+
+  <!-- ====================== Мобильная панель ======================= -->
+  <nav class="mobile-bar">
+    <button class="mb" data-sheet="palette"><span>⊞</span>Элементы</button>
+    <button class="mb" id="mbRun"><span id="mbRunIco">▶</span>Пуск</button>
+    <button class="mb" id="mbWire"><span>⁄</span>Провод</button>
+    <button class="mb" data-sheet="inspector"><span>⚙</span>Свойства</button>
+    <button class="mb" id="mbScope"><span>∿</span>График</button>
+  </nav>
+
+  <div class="sheet-backdrop" id="backdrop"></div>
+
+  <!-- =========================== Меню ============================== -->
+  <div class="menu-pop" id="menuPop" hidden>
+    <button data-act="new">Новая схема</button>
+    <button data-act="save">Сохранить в браузере</button>
+    <button data-act="load">Загрузить из браузера</button>
+    <hr>
+    <button data-act="export">Экспорт в файл…</button>
+    <button data-act="import">Импорт из файла…</button>
+    <hr>
+    <label class="menu-check"><input type="checkbox" id="optValues" checked> Показывать U / I / P</label>
+    <label class="menu-check"><input type="checkbox" id="optCurrent" checked> Анимация тока</label>
+    <label class="menu-check"><input type="checkbox" id="optVoltage" checked> Цвет по напряжению</label>
+    <label class="menu-check"><input type="checkbox" id="optGrid" checked> Сетка</label>
+    <hr>
+    <label class="menu-range">Скорость <span id="speedVal">1×</span>
+      <input type="range" id="optSpeed" min="-2" max="0.7" step="0.05" value="0">
+    </label>
+    <hr>
+    <button data-act="help">Справка и горячие клавиши</button>
+  </div>
+
+  <input type="file" id="fileInput" accept="application/json,.json" hidden>
+
+  <!-- ========================== Справка ============================ -->
+  <div class="modal" id="helpModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Как пользоваться</h2>
+        <button class="icon-btn" id="helpClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <h3>Сборка схемы</h3>
+        <ul>
+          <li>Коснитесь элемента в палитре, затем рабочего стола — элемент встанет на сетку.</li>
+          <li>Потяните от кружка на конце вывода к другому выводу — появится провод.</li>
+          <li>Перетаскивайте элементы, чтобы двигать их; провода перестроятся сами.</li>
+          <li>Выключатели и кнопки переключаются касанием во время работы.</li>
+        </ul>
+        <h3>Измерения</h3>
+        <ul>
+          <li><b>Вольтметр</b> подключают параллельно участку, <b>амперметр</b> — последовательно.</li>
+          <li><b>Ваттметр</b> имеет две пары клемм: токовые (в разрыв цепи) и клеммы напряжения (параллельно нагрузке).</li>
+          <li>Рядом с каждым элементом видны напряжение, ток и мощность.</li>
+          <li>Кнопка «На график» в свойствах выводит величину на осциллограф.</li>
+        </ul>
+        <h3>Клавиши</h3>
+        <table class="keys">
+          <tr><td>Пробел</td><td>пуск / пауза</td></tr>
+          <tr><td>V / W / E</td><td>выбор / провод / стирание</td></tr>
+          <tr><td>R</td><td>повернуть элемент</td></tr>
+          <tr><td>Delete</td><td>удалить выделенное</td></tr>
+          <tr><td>Ctrl + Z / Y</td><td>отменить / повторить</td></tr>
+          <tr><td>Ctrl + D</td><td>дублировать</td></tr>
+          <tr><td>Колесо мыши</td><td>масштаб</td></tr>
+          <tr><td>Средняя кнопка / пробел + тяга</td><td>панорама</td></tr>
+        </table>
+        <h3>Физика</h3>
+        <p class="muted">Расчёт ведётся модифицированным методом узловых потенциалов с методом Ньютона–Рафсона
+        для нелинейных элементов. Реактивные элементы интегрируются по методу трапеций.
+        Диоды описываются уравнением Шокли, биполярные транзисторы — моделью Эберса–Молла,
+        полевые — квадратичной моделью.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/solver.js"></script>
+<script src="js/components.js"></script>
+<script src="js/circuit.js"></script>
+<script src="js/render.js"></script>
+<script src="js/scope.js"></script>
+<script src="js/examples.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
