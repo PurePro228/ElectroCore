@@ -615,7 +615,7 @@
       { t: 'MAX7219', y: -GRID * 2, size: 9, color: 'rgba(232,240,248,.85)' },
       { t: c.powered ? (st.on ? 'РАБОТА' : 'ПОКОЙ') : '—', y: -GRID * 0.4, size: 7,
         color: st.on ? 'rgba(125,255,208,.8)' : 'rgba(255,170,120,.85)' },
-      { t: c.powered ? 'Iсег ' + U.fmtSI(c.iseg || 0, 2) + 'А' : '', y: GRID * 0.8,
+      { t: c.powered ? 'Iсег ' + U.fmtSI(c.iseg || 0, 2) + EC.t('А') : '', y: GRID * 0.8,
         size: 6.5, color: 'rgba(180,200,220,.7)' },
       { t: c.powered ? 'ярк ' + (((st.intensity + 1) * 100 / 16) | 0) + '%' : '',
         y: GRID * 2, size: 6.5, color: 'rgba(160,185,210,.6)' }

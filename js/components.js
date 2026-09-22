@@ -203,14 +203,15 @@
     for (var k = 0; k < list.length; k++) {
       var pin = def.pins[list[k].i];
       if (!pin) continue;
-      var inner = w / 2 - (g.measureText(list[k].t).width / 2) - 3;
+      var txt = EC.t(list[k].t);
+      var inner = w / 2 - (g.measureText(txt).width / 2) - 3;
       var px = list[k].x !== undefined ? list[k].x : (pin.x > 0 ? inner : -inner);
       var py = list[k].y !== undefined ? list[k].y : pin.y * GRID;
       g.save();
       g.translate(px, py);
       g.rotate(-(c.rot || 0) * Math.PI / 2);
       g.fillStyle = 'rgba(205,220,235,.72)';
-      g.fillText(list[k].t, 0, 0);
+      g.fillText(txt, 0, 0);
       g.restore();
     }
   }
@@ -515,7 +516,7 @@
       g.lineTo(r * 0.62, 0);
       g.stroke();
       g.shadowBlur = 0;
-      label(g, c, [(c.name || '') + ' ' + c.props.Vn + 'В/' + c.props.Pn + 'Вт']);
+      label(g, c, [(c.name || '') + ' ' + c.props.Vn + EC.t('В/') + c.props.Pn + EC.t('Вт')]);
     }
   });
 
@@ -784,7 +785,7 @@
         g.strokeStyle = 'rgba(110,230,190,.5)'; g.lineWidth = 6;
         g.beginPath(); g.moveTo(-GRID * 0.9, 0); g.lineTo(GRID * 0.9, 0); g.stroke();
       }
-      label(g, c, [(c.name || '') + (c.props.closed ? ' вкл' : ' выкл')]);
+      label(g, c, [(c.name || '') + EC.t(c.props.closed ? ' вкл' : ' выкл')]);
     }
   });
 
@@ -819,7 +820,7 @@
       g.fillStyle = cap;
       roundRect(g, -GRID * 0.62, y - GRID * 1.05, GRID * 1.24, GRID * 0.56, 3);
       g.fill();
-      label(g, c, [c.name || 'Кнопка']);
+      label(g, c, [c.name || EC.t('Кнопка')]);
     }
   });
 
@@ -901,7 +902,7 @@
       g.stroke();
       g.fillStyle = c.state && c.state.on ? '#6fe0c2' : '#5a6673';
       g.beginPath(); g.arc(GRID * 1.15, GRID, 2.6, 0, 7); g.fill();
-      label(g, c, [c.name || 'Реле'], GRID * 2.3);
+      label(g, c, [c.name || EC.t('Реле')], GRID * 2.3);
     }
   });
 })(window);
@@ -1012,7 +1013,7 @@
     },
     draw: function (g, c) {
       drawDiodeBody(g, c);
-      label(g, c, [c.name || 'Диод']);
+      label(g, c, [c.name || EC.t('Диод')]);
     }
   });
 
@@ -1383,7 +1384,7 @@
       g.fillStyle = 'rgba(205,220,235,.7)';
       g.fillText('ВЫХ', GRID * 0.25, 0);
       g.restore();
-      label(g, c, [c.name || 'ОУ'], GRID * 2.3);
+      label(g, c, [c.name || EC.t('ОУ')], GRID * 2.3);
     }
   });
 })(window);
@@ -1531,7 +1532,7 @@
       g.font = '700 10px ui-monospace, Menlo, monospace';
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.shadowColor = col; g.shadowBlur = 5;
-      g.fillText(U.fmtSI(c.v || 0, 3) + 'В', 0, -GRID * 0.3);
+      g.fillText(U.fmtSI(c.v || 0, 3) + EC.t('В'), 0, -GRID * 0.3);
       g.restore();
     }
   });
@@ -1656,7 +1657,7 @@
         g.lineTo(Math.cos(a) * r * 1.9, Math.sin(a) * r * 1.9);
         g.stroke();
       }
-      label(g, c, [(c.name || '') + ' ' + U.fmtUnit(ldrR(c), 'Ω'), U.fmtSI(ldrLux(c), 3) + ' лк'], GRID * 1.7);
+      label(g, c, [(c.name || '') + ' ' + U.fmtUnit(ldrR(c), 'Ω'), U.fmtSI(ldrLux(c), 3) + EC.t(' лк')], GRID * 1.7);
     }
   });
 
@@ -1774,7 +1775,7 @@
       g.moveTo(s * 0.35 + 4, -s * 0.95); g.lineTo(s * 0.35, -s * 0.95);
       g.lineTo(s * 0.35, s * 0.95); g.lineTo(s * 0.35 - 4, s * 0.95);
       g.stroke();
-      label(g, c, [c.name || 'Шоттки']);
+      label(g, c, [c.name || EC.t('Шоттки')]);
     }
   });
 
@@ -1825,7 +1826,7 @@
       g.fillText('~', -GRID * 0.8, 0);
       g.fillText('~', GRID * 0.8, 0);
       g.restore();
-      label(g, c, [c.name || 'Мост'], GRID * 2.6);
+      label(g, c, [c.name || EC.t('Мост')], GRID * 2.6);
     }
   });
 
@@ -1948,7 +1949,7 @@
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText('M', 0, -r * 0.55);
       g.restore();
-      label(g, c, [(c.name || '') + '  ' + Math.round(c.rpm || 0) + ' об/мин'], GRID * 1.75);
+      label(g, c, [(c.name || '') + '  ' + Math.round(c.rpm || 0) + EC.t(' об/мин')], GRID * 1.75);
     }
   });
 
@@ -1986,7 +1987,7 @@
           g.stroke();
         }
       }
-      label(g, c, [(c.name || '') + (loud > 0.05 ? '  звучит' : '')], GRID * 1.6);
+      label(g, c, [(c.name || '') + (loud > 0.05 ? EC.t('    звучит') : '')], GRID * 1.6);
     }
   });
 
@@ -2059,7 +2060,7 @@
         g.font = '700 11px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
         g.fillText(symbol, 0, 0);
         g.restore();
-        label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 1.7);
+        label(g, c, [(c.name || '') + '  ' + EC.t(c.level || '')], GRID * 1.7);
       }
     };
   }
@@ -2174,7 +2175,7 @@
         g.fillText('СБРОС', 0, GRID * 1.6);
       }
       g.restore();
-      label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 4.2);
+      label(g, c, [(c.name || '') + '  ' + EC.t(c.level || '')], GRID * 4.2);
     }
   });
 
@@ -2790,10 +2791,10 @@
       if (!ln.t) return;
       g.font = '700 ' + ln.size + 'px ui-monospace, Menlo, monospace';
       g.fillStyle = ln.color;
-      g.fillText(ln.t, 0, cy + ln.y);
+      g.fillText(EC.t(ln.t), 0, cy + ln.y);
     });
     g.restore();
-    label(g, c, [c.name || title], cy + h / 2 + GRID * 0.9);
+    label(g, c, [c.name || EC.t(title)], cy + h / 2 + GRID * 0.9);
   }
   EC.drawBigChip = drawBigChip;
 })(window);

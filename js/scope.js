@@ -56,7 +56,7 @@
   };
 
   Scope.prototype.unit = function (ch) {
-    return ch.kind === 'i' ? 'А' : (ch.kind === 'p' ? 'Вт' : 'В');
+    return EC.t(ch.kind === 'i' ? 'А' : (ch.kind === 'p' ? 'Вт' : 'В'));
   };
 
   Scope.prototype.title = function (ch) {
@@ -207,9 +207,9 @@
       var uu = this.unit(this.channels[i]);
       if (unit === null) unit = uu; else if (unit !== uu) mixed = true;
     }
-    g.fillText(U.fmtSI(scale / 4, 3) + (mixed || !unit ? '' : unit) + '/дел', x0 + 5, y0 + 4);
+    g.fillText(U.fmtSI(scale / 4, 3) + (mixed || !unit ? '' : unit) + EC.t('/дел'), x0 + 5, y0 + 4);
     g.textAlign = 'right';
-    g.fillText(U.fmtSI(this.window / 10, 3) + 'с/дел', x0 + w - 5, y0 + 4);
+    g.fillText(U.fmtSI(this.window / 10, 3) + EC.t('с/дел'), x0 + w - 5, y0 + 4);
     g.restore();
   };
 

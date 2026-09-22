@@ -4,13 +4,14 @@
   var EC = global.EC, U = EC.util;
   var GRID = EC.GRID;
   var $ = function (id) { return document.getElementById(id); };
+  var t = EC.t;
 
   var circuit, renderer, scope, board, scopeCanvas;
   var undoStack = [], redoStack = [];
   var MAX_UNDO = 80;
 
   var state = {
-    mode: 'select',
+    mode: 'move',
     running: false,
     hasRun: false,
     speed: 1,
@@ -58,7 +59,7 @@
       });
     }
     try { localStorage.setItem(LS_SKIN, sk); } catch (e) { /* приватный режим */ }
-    if (!silent) toast(sk === 'real' ? 'Вид: реалистичные детали' : 'Вид: условная схема');
+    if (!silent) toast(sk === 'real' ? t('Вид: реалистичные детали') : t('Вид: условная схема'));
   }
 
   /** Перерисовывает миниатюры палитры под текущий вид. */
@@ -67,6 +68,68 @@
       var cv = n.querySelector('canvas');
       if (cv) drawPreview(cv, n.getAttribute('data-type'));
     });
+  }
+
+  /* ================================================================== */
+  /*  Язык интерфейса                                                   */
+  /* ================================================================== */
+
+  var LS_LANG = 'electrocore.lang';
+  var staticText = null, staticAttrs = null;
+  var CYR = /[А-Яа-яЁё]/;
+
+  /**
+   * Запоминает исходный русский текст разметки. Вызывается один раз до
+   * того, как построены палитра и прочие собираемые на лету части, —
+   * те переводятся при сборке.
+   */
+  function collectStatic() {
+    staticText = [];
+    var walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    var n;
+    while ((n = walk.nextNode())) {
+      if (n.nodeValue && CYR.test(n.nodeValue)) staticText.push({ n: n, ru: n.nodeValue });
+    }
+    staticAttrs = [];
+    var attrs = ['title', 'placeholder', 'aria-label'];
+    Array.prototype.forEach.call(document.querySelectorAll('[title],[placeholder],[aria-label]'),
+      function (el) {
+        attrs.forEach(function (a) {
+          var v = el.getAttribute(a);
+          if (v && CYR.test(v)) staticAttrs.push({ el: el, a: a, ru: v });
+        });
+      });
+  }
+
+  /** Переводит разметку и всё, что собирается на лету. */
+  function applyLang(silent) {
+    document.documentElement.lang = EC.lang;
+    staticText.forEach(function (it) {
+      // ключ — текст без лишних пробелов, чтобы вёрстка не мешала переводу
+      var body = it.ru.trim().replace(/\s+/g, ' ');
+      var tr = t(body);
+      it.n.nodeValue = body === tr ? it.ru : it.ru.replace(it.ru.trim(), tr);
+    });
+    staticAttrs.forEach(function (it) { it.el.setAttribute(it.a, t(it.ru)); });
+    Array.prototype.forEach.call(document.querySelectorAll('#langSeg [data-lang]'), function (b) {
+      b.classList.toggle('on', b.getAttribute('data-lang') === EC.lang);
+    });
+    buildPalette();
+    buildExamples();
+    buildIsaTable();
+    refreshPreviews();
+    updateRunUI();
+    setMode(state.mode);
+    updateInspector();
+    renderScopeChips();
+    if (!silent) toast(EC.lang === 'en' ? 'Language: English' : 'Язык: русский');
+  }
+
+  function setLang(lang, silent) {
+    if (!lang || lang === EC.lang) return;
+    EC.lang = lang;
+    try { localStorage.setItem(LS_LANG, lang); } catch (e) { /* приватный режим */ }
+    applyLang(silent);
   }
 
   /* ================================================================== */
@@ -80,9 +143,14 @@
     renderer = new EC.Renderer(board, circuit);
     scope = new EC.Scope(scopeCanvas, circuit);
 
-    var savedSkin = null;
-    try { savedSkin = localStorage.getItem(LS_SKIN); } catch (e) { /* приватный режим */ }
+    var savedSkin = null, savedLang = null;
+    try {
+      savedSkin = localStorage.getItem(LS_SKIN);
+      savedLang = localStorage.getItem(LS_LANG);
+    } catch (e) { /* приватный режим */ }
     applySkin(savedSkin || 'real', true);
+    collectStatic();
+    if (savedLang === 'en') EC.lang = 'en';
 
     buildPalette();
     buildExamples();
@@ -102,6 +170,7 @@
     onResize();
 
     refreshPreviews();
+    if (EC.lang !== 'ru') applyLang(true);
     var restored = loadLocal(true);
     if (restored) { state.running = true; updateRunUI(); }
     else loadExample('led');
@@ -114,7 +183,8 @@
     EC.app = {
       get circuit() { return circuit; },
       renderer: renderer, scope: scope, state: state,
-      setMode: setMode, toggleRun: toggleRun, loadExample: loadExample
+      setMode: setMode, toggleRun: toggleRun, loadExample: loadExample,
+      setLang: setLang
     };
   }
 
@@ -133,7 +203,7 @@
     EC.categories.forEach(function (cat, ci) {
       var wrap = U.el('div', { class: 'cat' });
       var head = U.el('button', { class: 'cat-head' });
-      head.innerHTML = '<span>' + cat.name + '</span><span class="arrow">▼</span>';
+      head.innerHTML = '<span>' + escapeHtml(t(cat.name)) + '</span><span class="arrow">▼</span>';
       var items = U.el('div', { class: 'cat-items' });
       head.addEventListener('click', function () { wrap.classList.toggle('closed'); });
       cat.items.forEach(function (key) {
@@ -147,12 +217,12 @@
 
   function paletteItem(key) {
     var def = EC.defs[key];
-    var btn = U.el('button', { class: 'pal-item', 'data-type': key, title: def.tip || def.name });
+    var btn = U.el('button', { class: 'pal-item', 'data-type': key, title: t(def.tip || def.name) });
     var cv = U.el('canvas');
     cv.width = 88; cv.height = 52;
     drawPreview(cv, key);
     btn.appendChild(cv);
-    btn.appendChild(U.el('span', { class: 'nm', text: def.name }));
+    btn.appendChild(U.el('span', { class: 'nm', text: t(def.name) }));
     btn.addEventListener('pointerdown', function (e) {
       e.preventDefault();
       arm(key);
@@ -245,7 +315,7 @@
     renderer.selection = [c];
     updateInspector();
     updateDt();
-    toast(EC.defs[type].name + ' добавлен');
+    toast(EC.defs[type].name + t(' добавлен'));
     hideSheets();
   }
 
@@ -283,13 +353,22 @@
   function setMode(m) {
     state.mode = m;
     disarm();
+    closeConfirm();
     Array.prototype.forEach.call(document.querySelectorAll('.btn.mode'), function (b) {
       b.classList.toggle('active', b.getAttribute('data-mode') === m);
     });
     var stage = board.parentNode;
     stage.className = 'stage mode-' + m;
-    var mbw = $('mbWire');
-    if (mbw) mbw.classList.toggle('active', m === 'wire');
+    var mbm = $('mbMode');
+    if (mbm) {
+      var btn = document.querySelector('.btn.mode[data-mode="' + m + '"]');
+      var ico = mbm.querySelector('.ico'), tx = mbm.querySelector('.tx');
+      if (ico) ico.textContent = btn ? btn.getAttribute('data-ico') : '✥';
+      if (tx) tx.textContent = t(btn ? btn.getAttribute('data-short') : '');
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('#modePop [data-mode]'), function (b) {
+      b.classList.toggle('active', b.getAttribute('data-mode') === m);
+    });
   }
 
   function toggleRun() {
@@ -301,11 +380,11 @@
     var b = $('btnRun');
     b.classList.toggle('running', state.running);
     $('runIco').textContent = state.running ? '⏸' : '▶';
-    $('runLbl').textContent = state.running ? 'Пауза' : 'Пуск';
+    $('runLbl').textContent = state.running ? t('Пауза') : t('Пуск');
     var m = $('mbRunIco');
     if (m) {
       m.textContent = state.running ? '⏸' : '▶';
-      m.parentNode.lastChild.textContent = state.running ? 'Пауза' : 'Пуск';
+      m.parentNode.lastChild.textContent = state.running ? t('Пауза') : t('Пуск');
     }
   }
 
@@ -348,6 +427,10 @@
       var sk = e.target.getAttribute && e.target.getAttribute('data-skin');
       if (sk) applySkin(sk);
     });
+    $('langSeg').addEventListener('click', function (e) {
+      var lg = e.target.getAttribute && e.target.getAttribute('data-lang');
+      if (lg) setLang(lg);
+    });
     buildIsaTable();
     bindAi();
     $('helpClose').addEventListener('click', function () { $('helpModal').hidden = true; });
@@ -380,7 +463,7 @@
     var text = EC.aiPrompt.build();
     var bytes = new Blob([text]).size;          // в кириллице символ занимает два байта
     var n = Object.keys(EC.defs).length;
-    $('aiSize').textContent = Math.round(bytes / 1024) + ' КБ · ' + n + ' ' + plural(n, ['деталь', 'детали', 'деталей']);
+    $('aiSize').textContent = Math.round(bytes / 1024) + t(' КБ · ') + n + ' ' + plural(n, [t('деталь'), t('детали'), t('деталей')]);
   }
 
   /** Склонение существительного при числе: 1 деталь, 2 детали, 5 деталей. */
@@ -407,8 +490,8 @@
       toast('Описание сохранено');
     });
     $('aiCurrent').addEventListener('click', function () {
-      $('aiInput').value = JSON.stringify(EC.aiPrompt.export(circuit, 'Текущая схема'), null, 2);
-      showAiResult(null, [], ['Схема со стола записана в поле. Скопируйте её вместе с описанием и попросите ИИ внести правки.']);
+      $('aiInput').value = JSON.stringify(EC.aiPrompt.export(circuit, t('Текущая схема')), null, 2);
+      showAiResult(null, [], [t('Схема со стола записана в поле. Скопируйте её вместе с описанием и попросите ИИ внести правки.')]);
     });
     $('aiBuild').addEventListener('click', buildFromAi);
   }
@@ -431,11 +514,11 @@
     var html = '';
     if (ok === true && res) {
       var nc = res.circuit.components.length, nw = res.circuit.wires.length;
-      html += '<div class="ok">Собрано: «' + escapeHtml(res.title) + '» — ' +
-        nc + ' ' + plural(nc, ['деталь', 'детали', 'деталей']) + ', ' +
-        nw + ' ' + plural(nw, ['провод', 'провода', 'проводов']) + '.</div>';
+      html += '<div class="ok">' + t('Собрано: ') + '«' + escapeHtml(res.title) + '» — ' +
+        nc + ' ' + plural(nc, [t('деталь'), t('детали'), t('деталей')]) + ', ' +
+        nw + ' ' + plural(nw, [t('провод'), t('провода'), t('проводов')]) + '.</div>';
     } else if (ok === false) {
-      html += '<div class="bad">Схему собрать не удалось:</div>';
+      html += '<div class="bad">' + t('Схему собрать не удалось:') + '</div>';
     }
     if (errors && errors.length) {
       html += '<ul>' + errors.map(function (e) {
@@ -462,8 +545,8 @@
     if (!host || !EC.cpu) return;
     var html = '';
     EC.cpu.ISA.forEach(function (d) {
-      var operand = d.arg === 'n' ? ' число' : (d.arg === 'a' ? ' адрес' : '');
-      html += '<tr><td>' + d.m + operand + '</td><td>' + d.t + '</td></tr>';
+      var operand = d.arg === 'n' ? t(' число') : (d.arg === 'a' ? t(' адрес') : '');
+      html += '<tr><td>' + d.m + operand + '</td><td>' + escapeHtml(t(d.t)) + '</td></tr>';
     });
     host.innerHTML = html;
   }
@@ -495,8 +578,8 @@
     var list = $('exampleList');
     EC.examples.forEach(function (ex) {
       var card = U.el('button', { class: 'ex-card' });
-      card.appendChild(U.el('span', { class: 'ex-name', text: ex.name }));
-      card.appendChild(U.el('span', { class: 'ex-hint', text: ex.hint }));
+      card.appendChild(U.el('span', { class: 'ex-name', text: t(ex.name) }));
+      card.appendChild(U.el('span', { class: 'ex-hint', text: t(ex.hint) }));
       card.addEventListener('click', function () {
         $('exampleModal').hidden = true;
         loadExample(ex.id);
@@ -527,7 +610,7 @@
     renderer.fit();
     state.running = true;
     updateRunUI();
-    showAlert(ex.hint, 'info', 9000);
+    showAlert(t(ex.hint), 'info', 9000);
   }
 
   function setCircuit(ct) {
@@ -548,7 +631,7 @@
     var blob = new Blob([data], { type: 'application/json' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'схема-electrocore.json';
+    a.download = t('схема-electrocore.json');
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
@@ -644,6 +727,7 @@
   }
 
   function onPointerDown(e) {
+    if (confirmState) closeConfirm();
     board.setPointerCapture(e.pointerId);
     var p = localPos(e);
     state.pointers[e.pointerId] = p;
@@ -681,21 +765,76 @@
     var comp = renderer.componentAt(w.x, w.y);
     var wire = pin ? null : renderer.wireAt(w.x, w.y);
 
-    if (state.mode === 'erase') {
-      pushUndo();
-      if (comp) { circuit.remove(comp); renderer.selection = []; updateInspector(); }
-      else if (wire) circuit.removeWire(wire);
+    /* Рука: ничего не выделяем и не двигаем — только нажимаем. */
+    if (state.mode === 'hand') {
+      if (comp) {
+        var hdef = comp.def();
+        if (hdef.momentary) comp.pressed = true;
+        state.action = { type: 'press', comp: comp };
+        return;
+      }
+      state.action = { type: 'pan', sx: p.x, sy: p.y, vx: renderer.view.x, vy: renderer.view.y };
+      board.parentNode.classList.add('panning');
       return;
     }
 
-    if (pin && (state.mode === 'wire' || state.mode === 'select')) {
-      state.action = {
-        type: 'wire', from: pin, moved: false, touch: touch,
-        horizFirst: Math.abs(pin.comp.def().pins[pin.pin].x) >= Math.abs(pin.comp.def().pins[pin.pin].y)
-      };
-      renderer.pendingWire = { from: pin, to: w, horizFirst: state.action.horizFirst };
+    /* Стирание: только детали и только с подтверждением. */
+    if (state.mode === 'erase') {
+      if (comp) {
+        renderer.selection = [comp];
+        updateInspector();
+        askDelete(p, comp.name || comp.def().name, function () {
+          pushUndo();
+          circuit.remove(comp);
+          renderer.selection = [];
+          updateInspector();
+          updateDt();
+        });
+      } else {
+        state.action = { type: 'pan', sx: p.x, sy: p.y, vx: renderer.view.x, vy: renderer.view.y };
+        board.parentNode.classList.add('panning');
+      }
       return;
     }
+
+    /* Провод: тянем от вывода к выводу, а нажатие на провод его удаляет. */
+    if (state.mode === 'wire') {
+      if (pin) {
+        state.action = {
+          type: 'wire', from: pin, moved: false, touch: touch,
+          horizFirst: Math.abs(pin.comp.def().pins[pin.pin].x) >= Math.abs(pin.comp.def().pins[pin.pin].y)
+        };
+        renderer.pendingWire = { from: pin, to: w, horizFirst: state.action.horizFirst };
+        return;
+      }
+      if (wire) {
+        var grip = renderer.wireMidAt(w.x, w.y, touch ? 0.9 : 0.55);
+        if (grip === wire && !e.shiftKey) {
+          // потянуть за середину — переложить провод, просто нажать — удалить
+          renderer.selection = [wire];
+          updateInspector();
+          pushUndo();
+          state.action = { type: 'wiremove', wire: wire, moved: false, askOnTap: true, pt: p };
+          return;
+        }
+        renderer.selection = [wire];
+        updateInspector();
+        if (e.shiftKey) { pushUndo(); circuit.removeWire(wire); renderer.selection = []; updateInspector(); }
+        else askDelete(p, wireTitle(wire), function () {
+          pushUndo();
+          circuit.removeWire(wire);
+          renderer.selection = [];
+          updateInspector();
+        });
+        return;
+      }
+      state.action = { type: 'pan', sx: p.x, sy: p.y, vx: renderer.view.x, vy: renderer.view.y };
+      board.parentNode.classList.add('panning');
+      return;
+    }
+
+    /* Дальше — режим перемещения. */
+    if (pin && !comp) comp = pin.comp;
 
     if (comp) {
       if (renderer.selection.indexOf(comp) < 0) {
@@ -822,6 +961,17 @@
           if (def.toggle) { def.toggle(act.comp); }
         }
         if (act.comp.def().momentary) act.comp.pressed = false;
+      } else if (act.type === 'wiremove' && act.askOnTap && !act.moved) {
+        var dying = act.wire;
+        askDelete(act.pt, wireTitle(dying), function () {
+          circuit.removeWire(dying);
+          renderer.selection = [];
+          updateInspector();
+        });
+      } else if (act.type === 'press') {
+        var pdef = act.comp.def();
+        if (pdef.toggle) pdef.toggle(act.comp);
+        if (pdef.momentary) act.comp.pressed = false;
       } else if (act.type === 'marquee' && renderer.marquee) {
         var m = renderer.marquee;
         renderer.selection = circuit.components.filter(function (c) {
@@ -862,13 +1012,18 @@
         return;
       }
       if (e.code === 'Space') { e.preventDefault(); toggleRun(); return; }
-      if (k === 'v') setMode('select');
+      if (k === 'v') setMode('move');
       else if (k === 'w') setMode('wire');
       else if (k === 'e') setMode('erase');
+      else if (k === 'h') setMode('hand');
       else if (k === 'r') rotateSelection();
       else if (k === 'd') applySkin(state.skin === 'real' ? 'schema' : 'real');
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelection(); }
-      else if (e.key === 'Escape') { disarm(); renderer.selection = []; updateInspector(); }
+      else if (e.key === 'Escape') {
+        closeConfirm();
+        $('modePop').hidden = true;
+        disarm(); renderer.selection = []; updateInspector();
+      }
     });
     global.addEventListener('keyup', function (e) {
       if (e.code === 'Space') state.spaceDown = false;
@@ -921,20 +1076,20 @@
     body.innerHTML = '';
 
     if (!sel.length) {
-      title.textContent = 'Свойства';
+      title.textContent = t('Свойства');
       body.appendChild(U.el('p', {
         class: 'placeholder',
-        text: 'Выберите элемент, чтобы изменить параметры и увидеть измерения.'
+        text: t('Выберите элемент, чтобы изменить параметры и увидеть измерения.')
       }));
       return;
     }
     if (sel.length > 1) {
-      title.textContent = 'Выделено: ' + sel.length;
+      title.textContent = t('Выделено: ') + sel.length;
       var sec = U.el('div', { class: 'insp-section' });
       var acts = U.el('div', { class: 'insp-actions' });
-      acts.appendChild(actionBtn('Повернуть', rotateSelection));
-      acts.appendChild(actionBtn('Дублировать', duplicateSelection));
-      acts.appendChild(actionBtn('Удалить', deleteSelection, 'danger'));
+      acts.appendChild(actionBtn(t('Повернуть'), rotateSelection));
+      acts.appendChild(actionBtn(t('Дублировать'), duplicateSelection));
+      acts.appendChild(actionBtn(t('Удалить'), deleteSelection, 'danger'));
       sec.appendChild(acts);
       body.appendChild(sec);
       return;
@@ -942,20 +1097,20 @@
 
     var item = sel[0];
     if (!item.def) {                              // выделен провод
-      title.textContent = 'Провод';
+      title.textContent = t('Провод');
       var ws = U.el('div', { class: 'insp-section' });
       ws.appendChild(readouts([
-        { k: 'Ток', v: U.fmtSI(item.current || 0, 4) + 'А', cls: 'amber' }
+        { k: t('Ток'), v: U.fmtSI(item.current || 0, 4) + t('А'), cls: 'amber' }
       ]));
 
       var cf = U.el('div', { class: 'field' });
       cf.style.marginTop = '10px';
-      cf.appendChild(U.el('label', { text: 'Цвет изоляции' }));
+      cf.appendChild(U.el('label', { text: t('Цвет изоляции') }));
       var sw = U.el('div', { class: 'swatches' });
       EC.WIRE_COLORS.forEach(function (col, idx) {
         var b = U.el('button', {
           class: 'swatch' + (idx === item.color ? ' on' : ''),
-          title: col.name
+          title: t(col.name)
         });
         b.style.background = col.core;
         b.addEventListener('click', function () {
@@ -969,21 +1124,21 @@
 
       ws.appendChild(U.el('div', {
         class: 'insp-tip',
-        text: 'Потяните за середину провода, чтобы переложить его на другую линию коврика.'
+        text: t('Потяните за середину провода, чтобы переложить его на другую линию коврика.')
       }));
 
       var wa = U.el('div', { class: 'insp-actions' });
-      wa.appendChild(actionBtn('Переложить', function () {
+      wa.appendChild(actionBtn(t('Переложить'), function () {
         pushUndo();
         item.mid = undefined;
         item.mid = circuit.chooseMid(item);
       }));
-      wa.appendChild(actionBtn('Развернуть', function () {
+      wa.appendChild(actionBtn(t('Развернуть'), function () {
         pushUndo();
         item.axis = item.axis === 'v' ? 'h' : 'v';
         item.mid = circuit.chooseMid(item);
       }));
-      wa.appendChild(actionBtn('Удалить', function () {
+      wa.appendChild(actionBtn(t('Удалить'), function () {
         pushUndo(); circuit.removeWire(item); renderer.selection = []; updateInspector();
       }, 'danger'));
       ws.appendChild(wa);
@@ -992,18 +1147,18 @@
     }
 
     var c = item, def = c.def();
-    title.textContent = 'Свойства';
+    title.textContent = t('Свойства');
 
     /* шапка */
     var head = U.el('div', { class: 'insp-section' });
     var ttl = U.el('div', { class: 'insp-title' });
-    ttl.appendChild(U.el('span', { class: 'nm', text: c.name || def.name }));
-    ttl.appendChild(U.el('span', { class: 'chip', text: def.name }));
+    ttl.appendChild(U.el('span', { class: 'nm', text: c.name || t(def.name) }));
+    ttl.appendChild(U.el('span', { class: 'chip', text: t(def.name) }));
     head.appendChild(ttl);
-    if (def.tip) head.appendChild(U.el('div', { class: 'insp-tip', text: def.tip }));
+    if (def.tip) head.appendChild(U.el('div', { class: 'insp-tip', text: t(def.tip) }));
 
     var nameField = U.el('div', { class: 'field' });
-    nameField.appendChild(U.el('label', { text: 'Обозначение' }));
+    nameField.appendChild(U.el('label', { text: t('Обозначение') }));
     var nameInput = U.el('input', { type: 'text', value: c.name || '' });
     nameInput.addEventListener('change', function () { c.name = nameInput.value; });
     nameField.appendChild(nameInput);
@@ -1019,7 +1174,7 @@
 
     /* измерения */
     var ms = U.el('div', { class: 'insp-section' });
-    ms.appendChild(U.el('div', { class: 'insp-tip', text: 'Измерения' }));
+    ms.appendChild(U.el('div', { class: 'insp-tip', text: t('Измерения') }));
     var rd = U.el('div', { class: 'readouts' });
     rd.id = 'liveReadouts';
     ms.appendChild(rd);
@@ -1035,14 +1190,14 @@
     var as = U.el('div', { class: 'insp-section' });
     var acts2 = U.el('div', { class: 'insp-actions' });
     if (def.key === 'cpu8' || def.key === 'cpu_bus') {
-      acts2.appendChild(actionBtn('Перезапустить', function () {
+      acts2.appendChild(actionBtn(t('Перезапустить'), function () {
         if (def.init) def.init(c);
         toast('Процессор перезапущен');
       }));
     }
-    acts2.appendChild(actionBtn('Повернуть', rotateSelection));
-    acts2.appendChild(actionBtn('Дублировать', duplicateSelection));
-    acts2.appendChild(actionBtn('На график', function () {
+    acts2.appendChild(actionBtn(t('Повернуть'), rotateSelection));
+    acts2.appendChild(actionBtn(t('Дублировать'), duplicateSelection));
+    acts2.appendChild(actionBtn(t('На график'), function () {
       var kind = def.measure === 'i' ? 'i' : (def.measure === 'p' ? 'p' : 'v');
       scope.add(c.id, kind);
       renderScopeChips();
@@ -1051,12 +1206,12 @@
       toast('Добавлено на осциллограф');
     }));
     if (def.key !== 'probe') {
-      acts2.appendChild(actionBtn('Ток на график', function () {
+      acts2.appendChild(actionBtn(t('Ток на график'), function () {
         scope.add(c.id, 'i'); renderScopeChips();
         $('scopePanel').classList.remove('collapsed'); onResize();
       }));
     }
-    acts2.appendChild(actionBtn('Удалить', deleteSelection, 'danger'));
+    acts2.appendChild(actionBtn(t('Удалить'), deleteSelection, 'danger'));
     as.appendChild(acts2);
     body.appendChild(as);
   }
@@ -1089,11 +1244,13 @@
         pushUndo(); c.props[p.key] = cb.checked;
       });
       f.appendChild(cb);
-      f.appendChild(U.el('label', { for: id, text: p.label }));
+      f.appendChild(U.el('label', { for: id, text: t(p.label) }));
       return f;
     }
 
-    f.appendChild(U.el('label', { for: id, text: p.label + (p.unit ? ', ' + p.unit : '') }));
+    f.appendChild(U.el('label', {
+      for: id, text: t(p.label) + (p.unit ? ', ' + t(p.unit) : '')
+    }));
 
     if (p.type === 'code') {
       var ta = U.el('textarea', { class: 'code-edit', id: id, spellcheck: 'false' });
@@ -1103,10 +1260,10 @@
         var res = EC.cpu.assemble(ta.value);
         if (res.ok) {
           err.className = 'code-err ok';
-          err.textContent = 'Собрано: ' + res.size + ' байт';
+          err.textContent = t('Собрано: ') + res.size + t(' байт');
         } else {
           err.className = 'code-err bad';
-          err.textContent = 'Строка ' + res.errors[0].line + ': ' + res.errors[0].msg;
+          err.textContent = t('Строка ') + res.errors[0].line + ': ' + res.errors[0].msg;
         }
       }
       ta.addEventListener('input', assembleNow);
@@ -1125,7 +1282,7 @@
     if (p.type === 'select') {
       var sel = U.el('select', { id: id });
       p.options.forEach(function (o) {
-        sel.appendChild(U.el('option', { value: o.v, text: o.t }));
+        sel.appendChild(U.el('option', { value: o.v, text: t(o.t) }));
       });
       sel.value = c.props[p.key];
       sel.addEventListener('change', function () {
@@ -1187,9 +1344,9 @@
     var rows;
     if (def.key === 'npn' || def.key === 'pnp') {
       rows = [
-        { k: 'Iб', v: U.fmtSI(c.ib || 0, 3) + 'А' },
-        { k: 'Iк', v: U.fmtSI(c.ic || 0, 3) + 'А', cls: 'amber' },
-        { k: 'Uкэ', v: U.fmtSI(c.vce || 0, 3) + 'В', cls: 'blue' }
+        { k: t('Iб'), v: U.fmtSI(c.ib || 0, 3) + t('А') },
+        { k: t('Iк'), v: U.fmtSI(c.ic || 0, 3) + t('А'), cls: 'amber' },
+        { k: t('Uкэ'), v: U.fmtSI(c.vce || 0, 3) + t('В'), cls: 'blue' }
       ];
     } else if (def.key === 'cpu8') {
       var mach = c.state && c.state.m;
@@ -1202,26 +1359,26 @@
       var mb = c.state && c.state.m;
       rows = mb ? [
         { k: 'A', v: EC.cpu.hex(mb.a) },
-        { k: 'адрес', v: EC.cpu.hex(mb.addr), cls: 'amber' },
+        { k: t('адрес'), v: EC.cpu.hex(mb.addr), cls: 'amber' },
         { k: 'PC', v: EC.cpu.hex(mb.pc), cls: 'blue' }
       ] : [{ k: '—', v: '—' }];
     } else if (def.key === 'memory') {
       rows = [
-        { k: 'адрес', v: EC.cpu.hex(c.addr || 0) },
-        { k: 'байт', v: EC.cpu.hex(c.byte || 0), cls: 'amber' },
-        { k: 'U', v: U.fmtSI(c.v || 0, 3) + 'В', cls: 'blue' }
+        { k: t('адрес'), v: EC.cpu.hex(c.addr || 0) },
+        { k: t('байт'), v: EC.cpu.hex(c.byte || 0), cls: 'amber' },
+        { k: 'U', v: U.fmtSI(c.v || 0, 3) + t('В'), cls: 'blue' }
       ];
     } else if (def.key === 'opamp') {
       rows = [
-        { k: 'Uвх', v: U.fmtSI(c.vin || 0, 3) + 'В' },
-        { k: 'Uвых', v: U.fmtSI(c.vout || 0, 3) + 'В', cls: 'amber' },
-        { k: 'Iвых', v: U.fmtSI(c.i || 0, 3) + 'А', cls: 'blue' }
+        { k: t('Uвх'), v: U.fmtSI(c.vin || 0, 3) + t('В') },
+        { k: t('Uвых'), v: U.fmtSI(c.vout || 0, 3) + t('В'), cls: 'amber' },
+        { k: t('Iвых'), v: U.fmtSI(c.i || 0, 3) + t('А'), cls: 'blue' }
       ];
     } else {
       rows = [
-        { k: 'U', v: U.fmtSI(c.v || 0, 3) + 'В' },
-        { k: 'I', v: U.fmtSI(c.i || 0, 3) + 'А', cls: 'amber' },
-        { k: 'P', v: U.fmtSI(Math.abs(c.p || 0), 3) + 'Вт', cls: 'blue' }
+        { k: 'U', v: U.fmtSI(c.v || 0, 3) + t('В') },
+        { k: 'I', v: U.fmtSI(c.i || 0, 3) + t('А'), cls: 'amber' },
+        { k: 'P', v: U.fmtSI(Math.abs(c.p || 0), 3) + t('Вт'), cls: 'blue' }
       ];
     }
     var cells = host.children;
@@ -1242,23 +1399,23 @@
       var mm = c.state && c.state.m;
       if (!mm) { extra.textContent = ''; return; }
       var flags = (mm.z ? 'Z' : '·') + (mm.c ? 'C' : '·');
-      var where = c.inReset ? 'сброс' : (mm.halted ? 'остановлен' : EC.cpu.disassemble(mm.mem, mm.pc).text);
-      extra.textContent = 'Флаги ' + flags + ' · такт ' + mm.cycles + ' · ' + where;
+      var where = c.inReset ? t('сброс') : (mm.halted ? t('остановлен') : EC.cpu.disassemble(mm.mem, mm.pc).text);
+      extra.textContent = t('Флаги ') + flags + t(' · такт ') + mm.cycles + ' · ' + where;
     } else if (def.key === 'cpu_bus') {
       var mx = c.state && c.state.m;
       if (!mx) { extra.textContent = ''; return; }
       var fl = (mx.z ? 'Z' : '·') + (mx.c ? 'C' : '·');
-      var what = c.inReset ? 'сброс'
-        : (mx.halted ? 'остановлен'
-          : (mx.fetch ? 'выборка кода' : (mx.rd ? 'запись в память' : 'чтение памяти')));
-      extra.textContent = 'Флаги ' + fl + ' · такт ' + mx.cycles + ' · ' + what;
+      var what = c.inReset ? t('сброс')
+        : (mx.halted ? t('остановлен')
+          : (mx.fetch ? t('выборка кода') : (mx.rd ? t('запись в память') : t('чтение памяти'))));
+      extra.textContent = t('Флаги ') + fl + t(' · такт ') + mx.cycles + ' · ' + what;
     } else if (def.key === 'memory') {
       extra.textContent = c.powered
-        ? 'Обмен: ' + (c.mode || '—') + ' · ячеек ' + EC.MEM_BYTES +
-          ' · ' + (c.selected ? 'микросхема выбрана' : 'не выбрана')
-        : 'Питания нет';
+        ? t('Обмен: ') + (c.mode || '—') + t(' · ячеек ') + EC.MEM_BYTES +
+          ' · ' + (c.selected ? t('микросхема выбрана') : t('не выбрана'))
+        : t('Питания нет');
     } else {
-      extra.textContent = 'Режим: ' + (c.mode || '—');
+      extra.textContent = t('Режим: ') + (c.mode || '—');
     }
   }
 
@@ -1303,7 +1460,7 @@
     if (!scope.channels.length) {
       host.appendChild(U.el('span', {
         class: 'mini',
-        text: 'Выберите элемент и нажмите «На график»'
+        text: t('Выберите элемент и нажмите «На график»')
       }));
     }
   }
@@ -1319,13 +1476,13 @@
       html += '<div class="st-block"><div class="st-name" style="color:' + ch.color + '">' +
         scope.title(ch) + '</div>';
       if (st) {
-        html += '<div class="st-row"><b>текущее</b><span>' + U.fmtSI(st.last, 3) + u + '</span></div>';
-        html += '<div class="st-row"><b>размах</b><span>' + U.fmtSI(st.pp, 3) + u + '</span></div>';
-        html += '<div class="st-row"><b>среднее</b><span>' + U.fmtSI(st.avg, 3) + u + '</span></div>';
-        html += '<div class="st-row"><b>действ.</b><span>' + U.fmtSI(st.rms, 3) + u + '</span></div>';
-        if (st.freq > 0.01) html += '<div class="st-row"><b>частота</b><span>' + U.fmtSI(st.freq, 3) + 'Гц</span></div>';
+        html += '<div class="st-row"><b>' + t('текущее') + '</b><span>' + U.fmtSI(st.last, 3) + u + '</span></div>';
+        html += '<div class="st-row"><b>' + t('размах') + '</b><span>' + U.fmtSI(st.pp, 3) + u + '</span></div>';
+        html += '<div class="st-row"><b>' + t('среднее') + '</b><span>' + U.fmtSI(st.avg, 3) + u + '</span></div>';
+        html += '<div class="st-row"><b>' + t('действ.') + '</b><span>' + U.fmtSI(st.rms, 3) + u + '</span></div>';
+        if (st.freq > 0.01) html += '<div class="st-row"><b>' + t('частота') + '</b><span>' + U.fmtSI(st.freq, 3) + t('Гц') + '</span></div>';
       } else {
-        html += '<div class="st-row"><b>нет данных</b></div>';
+        html += '<div class="st-row"><b>' + t('нет данных') + '</b></div>';
       }
       html += '</div>';
     });
@@ -1345,9 +1502,22 @@
     });
     $('backdrop').addEventListener('click', hideSheets);
     $('mbRun').addEventListener('click', toggleRun);
-    $('mbWire').addEventListener('click', function () {
-      setMode(state.mode === 'wire' ? 'select' : 'wire');
+    $('mbMode').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var pop = $('modePop');
+      pop.hidden = !pop.hidden;
     });
+    Array.prototype.forEach.call(document.querySelectorAll('#modePop [data-mode]'), function (b) {
+      b.addEventListener('click', function () {
+        setMode(b.getAttribute('data-mode'));
+        $('modePop').hidden = true;
+      });
+    });
+    global.addEventListener('pointerdown', function (e) {
+      var pop = $('modePop');
+      if (!pop.hidden && !pop.contains(e.target) && e.target.id !== 'mbMode' &&
+        e.target.parentNode !== $('mbMode')) pop.hidden = true;
+    }, true);
     $('mbScope').addEventListener('click', function () {
       $('scopePanel').classList.toggle('collapsed');
       setTimeout(onResize, 240);
@@ -1382,6 +1552,65 @@
   /* ================================================================== */
 
   var toastTimer;
+  /* ================================================================== */
+  /*  Подтверждение удаления                                            */
+  /* ================================================================== */
+
+  var confirmState = null;
+
+  /** Короткое название провода: откуда и куда он идёт. */
+  function wireTitle(w) {
+    var a = circuit.byId(w.a.c), b = circuit.byId(w.b.c);
+    var side = function (c, idx) {
+      if (!c) return '?';
+      var pin = c.def().pins[idx];
+      return (c.name || t(c.def().name)) + (pin && pin.name ? ' · ' + t(pin.name) : '');
+    };
+    return side(a, w.a.p) + ' → ' + side(b, w.b.p);
+  }
+
+  /**
+   * Пузырёк «Удалить?» над местом нажатия. Так на телефоне ничего не
+   * пропадает от случайного касания, а на мыши то же самое делает
+   * Shift с нажатием.
+   */
+  function askDelete(pt, what, onYes) {
+    var pop = $('confirmPop');
+    if (!pop) { onYes(); return; }
+    pop.innerHTML = '';
+    pop.appendChild(U.el('div', { class: 'confirm-what', text: what || '' }));
+    var row = U.el('div', { class: 'confirm-row' });
+    var yes = U.el('button', { class: 'confirm-yes', text: t('Удалить?') });
+    var no = U.el('button', { class: 'confirm-no', text: '✕' });
+    row.appendChild(yes); row.appendChild(no);
+    pop.appendChild(row);
+    pop.hidden = false;
+    var r = board.getBoundingClientRect();
+    var host = board.parentNode.getBoundingClientRect();
+    var x = r.left - host.left + pt.x;
+    var y = r.top - host.top + pt.y;
+    pop.style.left = x + 'px';
+    pop.style.top = y + 'px';
+    // не вылезаем за край стола
+    var box = pop.getBoundingClientRect();
+    if (box.right > host.right - 6) pop.style.left = (x - (box.right - host.right + 6)) + 'px';
+    if (box.left < host.left + 6) pop.style.left = (x + (host.left + 6 - box.left)) + 'px';
+    if (box.top < host.top + 6) pop.classList.add('below'); else pop.classList.remove('below');
+    confirmState = { onYes: onYes };
+    yes.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      closeConfirm();
+      onYes();
+    });
+    no.addEventListener('click', function (ev) { ev.stopPropagation(); closeConfirm(); });
+  }
+
+  function closeConfirm() {
+    var pop = $('confirmPop');
+    if (pop) pop.hidden = true;
+    confirmState = null;
+  }
+
   function toast(msg) {
     var t = $('toast');
     t.textContent = msg;
@@ -1546,8 +1775,8 @@
   var frameCount = 0;
 
   function updateHud() {
-    $('hudTime').textContent = U.fmtSI(circuit.time, 4) + 'с';
-    $('hudDt').textContent = U.fmtSI(circuit.dt, 3) + 'с';
+    $('hudTime').textContent = U.fmtSI(circuit.time, 4) + t('с');
+    $('hudDt').textContent = U.fmtSI(circuit.dt, 3) + t('с');
     $('hudNodes').textContent = circuit.size || 0;
     $('hudIter').textContent = (circuit.iterations || 0) +
       (state.running ? ' · ' + formatSpeed(state.lastRate) : '');

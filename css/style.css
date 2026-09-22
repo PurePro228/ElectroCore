@@ -783,6 +783,9 @@ input[type=range]::-moz-range-thumb {
     cursor: pointer;
   }
   .mb span { font-size: 17px; line-height: 1; }
+  .mb .tx { font-size: 10px; line-height: 1.1; }
+  /* на телефоне режим выбирается снизу — сверху эти кнопки не нужны */
+  .tool-group.modes { display: none; }
   .mb.active { color: var(--accent-2); }
   .mb:active { background: var(--hover); }
 
@@ -828,4 +831,119 @@ body.skin-real input[type=range]::-webkit-slider-runnable-track { background: #c
 body.skin-real input[type=range]::-moz-range-track { background: #cfd8d2; }
 @media (max-width: 720px) {
   body.skin-real .panel { box-shadow: 0 -10px 30px rgba(25,60,45,.2); }
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Подтверждение удаления и выбор режима                              */
+/* ------------------------------------------------------------------ */
+
+.confirm-pop {
+  position: absolute;
+  z-index: 40;
+  transform: translate(-50%, calc(-100% - 14px));
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, rgba(0, 0, 0, .14));
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(8, 30, 24, .28);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 132px;
+  max-width: 260px;
+  animation: pop-in .12s ease-out;
+}
+.confirm-pop.below { transform: translate(-50%, 14px); }
+.confirm-pop::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  margin-left: -7px;
+  border: 7px solid transparent;
+  border-top-color: var(--panel, #fff);
+  border-bottom: 0;
+}
+.confirm-pop.below::after {
+  bottom: auto;
+  top: -7px;
+  border-top: 0;
+  border-bottom: 7px solid var(--panel, #fff);
+}
+.confirm-what {
+  font-size: 11px;
+  opacity: .75;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.confirm-row { display: flex; gap: 6px; }
+.confirm-yes {
+  flex: 1;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #d8483c;
+  cursor: pointer;
+}
+.confirm-yes:hover { background: #c33d32; }
+.confirm-no {
+  border: 1px solid var(--line, rgba(0, 0, 0, .14));
+  background: transparent;
+  border-radius: 8px;
+  width: 32px;
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  opacity: .7;
+}
+@keyframes pop-in { from { opacity: 0; transform: translate(-50%, calc(-100% - 6px)); } }
+
+.mode-pop {
+  display: none;
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--mobile-h, 58px) + env(safe-area-inset-bottom) + 10px);
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, rgba(0, 0, 0, .14));
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(8, 30, 24, .3);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+}
+.mode-pop button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: inherit;
+  padding: 10px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.mode-pop button span { width: 20px; text-align: center; font-size: 15px; }
+.mode-pop button.active { background: var(--accent-soft, rgba(60, 170, 130, .16)); font-weight: 600; }
+
+.stage.mode-hand canvas { cursor: grab; }
+.stage.mode-hand.panning canvas { cursor: grabbing; }
+.stage.mode-move canvas { cursor: default; }
+.stage.mode-erase canvas { cursor: crosshair; }
+
+@media (max-width: 900px) {
+  .mode-pop { display: flex; }
 }

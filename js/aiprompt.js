@@ -30,29 +30,31 @@
   }
 
   function pinList(def) {
+    var T = EC.t || function (x) { return x; };
     return def.pins.map(function (p, i) {
-      var nm = p.name ? ' «' + p.name + '»' : '';
+      var nm = p.name ? ' «' + T(p.name) + '»' : '';
       return i + nm + ' (' + p.x + ',' + p.y + ')';
     }).join(' · ');
   }
 
   function propLine(p) {
+    var T = EC.t || function (x) { return x; };
     var parts = [p.key + ' = '];
     if (p.type === 'select') {
       parts.push(JSON.stringify(p.def));
-      parts.push(' — одно из: ' + p.options.map(function (o) { return o.v; }).join(', '));
+      parts.push(T(' — одно из: ') + p.options.map(function (o) { return o.v; }).join(', '));
     } else if (p.type === 'bool') {
-      parts.push(String(p.def) + ' (true или false)');
+      parts.push(String(p.def) + T(' (true или false)'));
     } else if (p.type === 'code') {
-      parts.push('"текст программы" (см. раздел про процессор)');
+      parts.push(T('"текст программы" (см. раздел про процессор)'));
     } else {
       parts.push(String(p.def));
       var range = [];
-      if (p.min !== undefined) range.push('не меньше ' + p.min);
-      if (p.max !== undefined) range.push('не больше ' + p.max);
+      if (p.min !== undefined) range.push(T('не меньше ') + p.min);
+      if (p.max !== undefined) range.push(T('не больше ') + p.max);
       if (range.length) parts.push(' (' + range.join(', ') + ')');
     }
-    var tail = ' — ' + p.label + (p.unit ? ', ' + p.unit : '');
+    var tail = ' — ' + T(p.label) + (p.unit ? ', ' + T(p.unit) : '');
     return parts.join('') + tail;
   }
 
@@ -62,7 +64,8 @@
 
   function build() {
     var L = [];
-    var add = function (s) { L.push(s === undefined ? '' : s); };
+    var T = EC.t || function (x) { return x; };
+    var add = function (s) { L.push(s === undefined ? '' : T(s)); };
     var rule = function (ch) { add(new Array(69).join(ch || '-')); };
 
     rule('=');
@@ -203,7 +206,7 @@
     add('Строки вида "4.7k" тоже принимаются, но числа надёжнее.');
     add();
     add('ЦВЕТА ПРОВОДОВ ("color", необязательно) — как в наборе перемычек:');
-    var colors = EC.WIRE_COLORS.map(function (c, i) { return i + ' ' + c.name; });
+    var colors = EC.WIRE_COLORS.map(function (c, i) { return i + ' ' + T(c.name); });
     while (colors.length) add('  ' + colors.splice(0, 4).join(' · '));
     add('Если не указывать, цвета назначатся по кругу. Осмысленно:');
     add('красный на плюс питания, чёрный на общий провод.');
@@ -219,7 +222,7 @@
     add();
     var sample = EC.examples ? EC.examples[0].make() : null;
     if (sample) {
-      JSON.stringify(exportCircuit(sample, 'Светодиод и резистор'), null, 2)
+      JSON.stringify(exportCircuit(sample, T('Светодиод и резистор')), null, 2)
         .split('\n').forEach(function (s) { add(s); });
     }
     add();
@@ -234,7 +237,7 @@
 
     /* -------------------------- справочник -------------------------- */
     rule('=');
-    add(' 6. СПРАВОЧНИК ДЕТАЛЕЙ (' + Object.keys(EC.defs).length + ')');
+    add(T(' 6. СПРАВОЧНИК ДЕТАЛЕЙ') + ' (' + Object.keys(EC.defs).length + ')');
     rule('=');
     add();
     add('Формат записи:');
@@ -248,18 +251,18 @@
 
     EC.categories.forEach(function (cat) {
       rule('-');
-      add(' ' + cat.name.toUpperCase());
+      add(' ' + T(cat.name).toUpperCase());
       rule('-');
       add();
       cat.items.forEach(function (key) {
         var def = EC.defs[key];
         var fp = footprint(key);
-        add(key + ' — ' + def.name);
-        if (def.tip) add('    ' + def.tip);
-        add('    габарит: ' + fp.w + ' × ' + fp.h + ' клеток');
-        add('    выводы: ' + (def.pins.length ? pinList(def) : 'нет'));
+        add(key + ' — ' + T(def.name));
+        if (def.tip) add('    ' + T(def.tip));
+        add('    ' + T('габарит: ') + fp.w + ' × ' + fp.h + T(' клеток'));
+        add('    ' + T('выводы: ') + (def.pins.length ? pinList(def) : T('нет')));
         if (def.props.length) {
-          add('    параметры:');
+          add('    ' + T('параметры:'));
           def.props.forEach(function (p) { add('      ' + propLine(p)); });
         }
         add();
@@ -310,9 +313,9 @@
     add('СИСТЕМА КОМАНД:');
     add();
     EC.cpu.ISA.forEach(function (d) {
-      var operand = d.arg === 'n' ? ' число' : (d.arg === 'a' ? ' адрес' : '');
+      var operand = d.arg === 'n' ? T(' число') : (d.arg === 'a' ? T(' адрес') : '');
       add('  ' + (d.m + operand + '                ').slice(0, 14) +
-        '0x' + EC.cpu.hex(d.op) + '  ' + d.t);
+        '0x' + EC.cpu.hex(d.op) + '  ' + T(d.t));
     });
     add();
     add('Задержки делай циклами — отдельной команды паузы нет. У EC-8');
@@ -453,7 +456,7 @@
     });
     var out = {
       format: FORMAT,
-      title: title || 'Схема',
+      title: title || (EC.t ? EC.t('Схема') : 'Схема'),
       components: circuit.components.map(function (c) {
         var item = { id: idOf[c.id], type: c.type, x: c.x, y: c.y };
         if (c.rot) item.rot = c.rot;

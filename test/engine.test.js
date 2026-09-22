@@ -4,7 +4,7 @@
 'use strict';
 const path = require('path');
 global.window = {};
-['util', 'solver', 'cpu', 'components', 'display', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
+['util', 'i18n', 'solver', 'cpu', 'components', 'display', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
   require(path.join(__dirname, '..', 'js', m + '.js'));
 });
 const EC = global.window.EC;
@@ -1593,6 +1593,99 @@ test('Пример «Счётчик на цифровом индикаторе»
   check('показаны четыре разряда', drv.state.scan, 3, 0);
   check('счёт дошёл до 0000', seen.indexOf('0000') >= 0 ? 1 : 0, 1, 0);
   check('счёт продолжился', seen.indexOf('0002') > seen.indexOf('0000') ? 1 : 0, 1, 0);
+});
+
+
+/* ------------------------------------------------------------------ */
+/*  Два языка интерфейса                                               */
+/* ------------------------------------------------------------------ */
+
+test('Английский перевод покрывает всё, что видит человек', function () {
+  const d = EC.i18n.en;
+  const cyr = /[А-Яа-яЁё]/;
+  const miss = [];
+  const chk = s => {
+    if (typeof s === 'string' && cyr.test(s) && d[s] === undefined && miss.indexOf(s) < 0) miss.push(s);
+  };
+  EC.categories.forEach(c => chk(c.name));
+  Object.keys(EC.defs).forEach(function (k) {
+    const def = EC.defs[k];
+    chk(def.name); chk(def.tip);
+    (def.pins || []).forEach(p => chk(p.name));
+    (def.props || []).forEach(function (p) {
+      chk(p.label); chk(p.unit);
+      if (typeof p.def === 'string') chk(p.def);
+      (p.options || []).forEach(o => chk(o.t));
+    });
+  });
+  EC.WIRE_COLORS.forEach(c => chk(c.name));
+  EC.cpu.ISA.forEach(x => chk(x.t));
+  EC.examples.forEach(function (e) { chk(e.name); chk(e.hint); });
+  if (miss.length) console.log('      нет перевода: ' + miss.slice(0, 5).join(' | '));
+  check('все названия, подсказки и параметры переведены', miss.length, 0, 0);
+
+  // в английском описании для ИИ не должно остаться русского текста
+  EC.lang = 'en';
+  const text = EC.aiPrompt.build();
+  const ru = text.split('\n').filter(l => cyr.test(l));
+  if (ru.length) console.log('      осталось: ' + ru.slice(0, 3).join(' | '));
+  check('описание формата полностью на английском', ru.length, 0, 0);
+  check('английское описание не короче русского', text.length > 20000 ? 1 : 0, 1, 0);
+
+  // английские программы примеров собираются и дают тот же код
+  let bad = 0, checked = 0;
+  Object.keys(d).forEach(function (k) {
+    if (k.indexOf('\n') < 0) return;
+    const a = EC.cpu.assemble(k), b = EC.cpu.assemble(d[k]);
+    checked++;
+    if (!b.ok || a.size !== b.size) bad++;
+  });
+  check('переведённые программы собираются', bad, 0, 0);
+  check('программ проверено', checked >= 6 ? 1 : 0, 1, 0);
+
+  // единицы измерения и приставки следуют за языком
+  check('приставка СИ по-английски', EC.util.fmtSI(4700, 3) === '4.7k' ? 1 : 0, 1, 0);
+  check('единица по-английски', EC.util.fmtUnit(5, 'В') === '5V' ? 1 : 0, 1, 0);
+  EC.lang = 'ru';
+  check('приставка СИ по-русски', EC.util.fmtSI(4700, 3) === '4.7к' ? 1 : 0, 1, 0);
+  check('единица по-русски', EC.util.fmtUnit(5, 'В') === '5В' ? 1 : 0, 1, 0);
+});
+
+test('Перевод покрывает и статическую разметку', function () {
+  const fs = require('fs');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+    .replace(/<(script|style)[\s\S]*?<\/\1>/g, '');
+  const cyr = /[А-Яа-яЁё]/;
+  const seen = [];
+  const push = v => {
+    const s = v.split(/\s+/).filter(Boolean).join(' ');
+    if (s && cyr.test(s) && seen.indexOf(s) < 0) seen.push(s);
+  };
+  let m;
+  const re = />([^<>]+)</g;
+  while ((m = re.exec(html))) push(m[1]);
+  const at = /(?:title|placeholder|aria-label)="([^"]*)"/g;
+  while ((m = at.exec(html))) push(m[1]);
+  const miss = seen.filter(x => EC.i18n.en[x] === undefined);
+  if (miss.length) console.log('      нет перевода: ' + miss.slice(0, 5).join(' | '));
+  check('весь текст разметки переведён', miss.length, 0, 0);
+  check('строк разметки проверено', seen.length > 80 ? 1 : 0, 1, 0);
+});
+
+test('Схема на английском языке считается так же', function () {
+  EC.lang = 'en';
+  const ct = EC.examples.find(e => e.id === 'max7219').make();
+  const disp = ct.components.find(c => c.type === 'seg7x4');
+  const cpu = ct.components.find(c => c.type === 'cpu8');
+  check('английская программа собрана', cpu.state.asm.ok ? 1 : 0, 1, 0);
+  const seen = [];
+  for (let i = 0; i < 60000; i++) {
+    ct.step(1 / 12000);
+    if (i % 3000 === 0 && /^\d{4}$/.test(disp.level) &&
+      seen[seen.length - 1] !== disp.level) seen.push(disp.level);
+  }
+  check('счёт идёт и по-английски', seen.indexOf('0000') >= 0 && seen.length >= 2 ? 1 : 0, 1, 0);
+  EC.lang = 'ru';
 });
 
 console.log('\n' + '─'.repeat(50));

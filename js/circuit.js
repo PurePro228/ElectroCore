@@ -50,7 +50,8 @@
     this.props = {};
     for (var i = 0; i < def.props.length; i++) {
       var p = def.props[i];
-      this.props[p.key] = p.def;
+      // текст программы даём на языке интерфейса
+      this.props[p.key] = (p.type === 'code' && EC.t) ? EC.t(p.def) : p.def;
     }
     this.name = '';
     this.v = 0; this.i = 0;

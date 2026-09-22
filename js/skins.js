@@ -62,7 +62,7 @@
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillStyle = color || 'rgba(250,252,255,.85)';
-    g.fillText(text, x || 0, y || 0);
+    g.fillText(EC.t(text), x || 0, y || 0);
     g.restore();
   }
 
@@ -171,7 +171,7 @@
     g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 0.9;
     roundRect(g, -w / 2, -h / 2, w, h, 4); g.stroke();
     silk(g, c, U.fmtUnit(c.props.C, 'Ф'), -w * 0.1, -3, 6.5);
-    silk(g, c, Math.round(c.props.vmax) + 'В', -w * 0.1, 5, 6);
+    silk(g, c, Math.round(c.props.vmax) + EC.t('В'), -w * 0.1, 5, 6);
     if (c.warn) {
       g.fillStyle = 'rgba(255,90,60,.3)';
       roundRect(g, -w / 2 - 2, -h / 2 - 2, w + 4, h + 4, 5); g.fill();
@@ -300,7 +300,7 @@
     g.shadowBlur = 0;
     g.fillStyle = 'rgba(255,255,255,.4)';
     g.beginPath(); g.ellipse(-r * 0.34, -r * 0.4, r * 0.26, r * 0.15, -0.6, 0, 7); g.fill();
-    label(g, c, [(c.name || '') + '  ' + c.props.Vn + 'В/' + c.props.Pn + 'Вт']);
+    label(g, c, [(c.name || '') + '  ' + c.props.Vn + EC.t('В/') + c.props.Pn + EC.t('Вт')]);
   };
 
   real.fuse = function (g, c) {
@@ -527,7 +527,7 @@
     }
     g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 0.9;
     roundRect(g, -w / 2, -h / 2, w, h, 2.5); g.stroke();
-    label(g, c, [c.name || 'Кнопка'], GRID * 1.45);
+    label(g, c, [c.name || EC.t('Кнопка')], GRID * 1.45);
   };
 
   real.spdt = function (g, c) {
@@ -590,7 +590,7 @@
     g.beginPath(); g.arc(w * 0.24, h * 0.09, 2.2, 0, 7); g.fill();
     g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 0.9;
     roundRect(g, -w / 2, -h / 2, w, h, 3); g.stroke();
-    label(g, c, [c.name || 'Реле'], GRID * 2.5);
+    label(g, c, [c.name || EC.t('Реле')], GRID * 2.5);
   };
 })(window);
 
@@ -623,7 +623,7 @@
     diodeCase(g, c, 'diodeBody', [
       [0, '#4a4f57'], [0.22, '#2b2f36'], [0.68, '#1b1e23'], [1, '#0e1013']
     ], '#e8eef5', '1N4148');
-    label(g, c, [c.name || 'Диод'], GRID * 1.1);
+    label(g, c, [c.name || EC.t('Диод')], GRID * 1.1);
   };
 
   real.zener = function (g, c) {
@@ -803,7 +803,7 @@
       g.strokeStyle = 'rgba(255,170,90,.75)'; g.lineWidth = 1.3;
       roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
     }
-    label(g, c, [c.name || 'ОУ'], GRID * 2.2);
+    label(g, c, [c.name || EC.t('ОУ')], GRID * 2.2);
   };
 
   /* ---------------------------- приборы ------------------------------ */
@@ -844,7 +844,7 @@
     var w = GRID * 2.9, h = GRID * 2.2;
     lead(g, -2 * GRID, 0, -w / 2 - 1, 0, 2.8);
     lead(g, w / 2 + 1, 0, 2 * GRID, 0, 2.8);
-    panelMeter(g, c, 'V', '#7dffd0', U.fmtSI(c.reading || 0, 4), 'В', w, h);
+    panelMeter(g, c, 'V', '#7dffd0', U.fmtSI(c.reading || 0, 4), EC.t('В'), w, h);
     terminal(g, -w / 2 - 1, 0, '#c0392b');
     terminal(g, w / 2 + 1, 0, '#1c1f24');
     label(g, c, [c.name || ''], GRID * 1.9);
@@ -854,7 +854,7 @@
     var w = GRID * 2.9, h = GRID * 2.2;
     lead(g, -2 * GRID, 0, -w / 2 - 1, 0, 2.8);
     lead(g, w / 2 + 1, 0, 2 * GRID, 0, 2.8);
-    panelMeter(g, c, 'A', '#ffd479', U.fmtSI(c.reading || 0, 4), 'А', w, h);
+    panelMeter(g, c, 'A', '#ffd479', U.fmtSI(c.reading || 0, 4), EC.t('А'), w, h);
     terminal(g, -w / 2 - 1, 0, '#c0392b');
     terminal(g, w / 2 + 1, 0, '#1c1f24');
     label(g, c, [c.name || ''], GRID * 1.9);
@@ -866,7 +866,7 @@
     lead(g, 3 * GRID, -GRID, w / 2 + 1, -GRID * 0.7, 2.8);
     lead(g, -3 * GRID, 2 * GRID, -w / 2 - 1, GRID * 0.7, 2.8);
     lead(g, 3 * GRID, 2 * GRID, w / 2 + 1, GRID * 0.7, 2.8);
-    panelMeter(g, c, 'W', '#9fd0ff', U.fmtSI(c.avg || 0, 4), 'Вт', w, h);
+    panelMeter(g, c, 'W', '#9fd0ff', U.fmtSI(c.avg || 0, 4), EC.t('Вт'), w, h);
     terminal(g, -w / 2 - 1, -GRID * 0.7, '#c0392b');
     terminal(g, w / 2 + 1, -GRID * 0.7, '#1c1f24');
     terminal(g, -w / 2 - 1, GRID * 0.7, '#2471a3');
@@ -899,7 +899,7 @@
     g.save();
     g.rotate(-(c.rot || 0) * Math.PI / 2);
     g.translate(0, -GRID * 0.36);
-    lcd(g, GRID * 2.6, GRID * 0.92, U.fmtSI(c.v || 0, 3) + 'В', null, '#7dffd0');
+    lcd(g, GRID * 2.6, GRID * 0.92, U.fmtSI(c.v || 0, 3) + EC.t('В'), null, '#7dffd0');
     g.restore();
   };
 
@@ -1038,7 +1038,7 @@
     g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 0.8;
     roundRect(g, -w / 2, -h / 2, w, h, h * 0.3); g.stroke();
     silk(g, c, '1N5819', -w * 0.12, 0, 5, 'rgba(225,235,245,.7)');
-    label(g, c, [c.name || 'Шоттки'], GRID * 1.1);
+    label(g, c, [c.name || EC.t('Шоттки')], GRID * 1.1);
   };
 
   real.bridge = function (g, c) {
@@ -1066,7 +1066,7 @@
     g.fillText('~', -s * 0.62, 0);
     g.fillText('~', s * 0.62, 0);
     g.restore();
-    label(g, c, [c.name || 'Мост'], GRID * 2.5);
+    label(g, c, [c.name || EC.t('Мост')], GRID * 2.5);
   };
 
   real.regulator = function (g, c) {
@@ -1152,7 +1152,7 @@
         g.stroke();
       }
     }
-    label(g, c, [(c.name || '') + (loud > 0.05 ? '  звучит' : '')], GRID * 1.6);
+    label(g, c, [(c.name || '') + (loud > 0.05 ? EC.t('    звучит') : '')], GRID * 1.6);
   };
 
   /** Логическая микросхема в корпусе DIP. */
@@ -1182,7 +1182,7 @@
       g.strokeStyle = 'rgba(125,255,208,.55)'; g.lineWidth = 1.2;
       roundRect(g, -w / 2, -h / 2, w, h, 2); g.stroke();
     }
-    label(g, c, [(c.name || '') + '  ' + (c.level || '')], GRID * 1.9);
+    label(g, c, [(c.name || '') + '  ' + EC.t(c.level || '')], GRID * 1.9);
   }
 
   real.not_gate = function (g, c) { logicChip(g, c, '1', 1); };
@@ -1241,7 +1241,7 @@
     gfx.chipPins(g, c, EC.NE555_PINS, w, 5.4);
     // надписи ставим в промежутки между рядами выводов
     silk(g, c, 'NE555', 0, 0, 8, 'rgba(232,240,248,.82)');
-    var st = (c.reset && c.vcc > 0.5) ? 'СБРОС' : (c.level === '1' ? 'ВЫХ 1' : 'ВЫХ 0');
+    var st = EC.t((c.reset && c.vcc > 0.5) ? 'СБРОС' : (c.level === '1' ? 'ВЫХ 1' : 'ВЫХ 0'));
     silk(g, c, st, 0, h * 0.23, 6.5,
       (c.reset && c.vcc > 0.5) ? 'rgba(255,170,120,.9)'
         : (c.level === '1' ? '#7dffd0' : 'rgba(180,195,210,.6)'));
@@ -1296,7 +1296,7 @@
       if (!ln.t) return;
       g.font = '700 ' + ln.size + 'px ui-monospace, Menlo, monospace';
       g.fillStyle = ln.color;
-      g.fillText(ln.t, 0, cy + ln.y);
+      g.fillText(EC.t(ln.t), 0, cy + ln.y);
     });
     g.restore();
 

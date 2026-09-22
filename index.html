@@ -28,9 +28,14 @@
     </div>
 
     <div class="tool-group modes" role="group" aria-label="Инструмент">
-      <button class="btn mode active" data-mode="select" title="Выбор и перемещение (V)">✥<span class="lbl">Выбор</span></button>
-      <button class="btn mode" data-mode="wire" title="Провод (W)">⁄<span class="lbl">Провод</span></button>
-      <button class="btn mode" data-mode="erase" title="Удаление (E)">⌫<span class="lbl">Стереть</span></button>
+      <button class="btn mode" data-mode="hand" data-ico="✋" data-short="Рука"
+        title="Рука: ничего не меняет, только нажимает (H)">✋<span class="lbl">Рука</span></button>
+      <button class="btn mode active" data-mode="move" data-ico="✥" data-short="Двигать"
+        title="Перемещение деталей (V)">✥<span class="lbl">Перемещение</span></button>
+      <button class="btn mode" data-mode="wire" data-ico="⁄" data-short="Провод"
+        title="Провода: тянуть и удалять (W)">⁄<span class="lbl">Провод</span></button>
+      <button class="btn mode" data-mode="erase" data-ico="⌫" data-short="Стереть"
+        title="Удаление деталей (E)">⌫<span class="lbl">Стереть</span></button>
     </div>
 
     <div class="tool-group edit">
@@ -75,6 +80,8 @@
       </div>
 
       <div class="alerts" id="alerts"></div>
+
+      <div class="confirm-pop" id="confirmPop" hidden></div>
 
       <div class="zoom-controls">
         <button class="icon-btn" id="btnZoomIn" title="Приблизить">＋</button>
@@ -135,12 +142,20 @@
   <nav class="mobile-bar">
     <button class="mb" data-sheet="palette"><span>⊞</span>Элементы</button>
     <button class="mb" id="mbRun"><span id="mbRunIco">▶</span>Пуск</button>
-    <button class="mb" id="mbWire"><span>⁄</span>Провод</button>
+    <button class="mb" id="mbMode"><span class="ico">✥</span><span class="tx">Двигать</span></button>
     <button class="mb" data-sheet="inspector"><span>⚙</span>Свойства</button>
     <button class="mb" id="mbScope"><span>∿</span>График</button>
   </nav>
 
   <div class="sheet-backdrop" id="backdrop"></div>
+
+  <!-- ====================== Выбор режима на телефоне ================ -->
+  <div class="mode-pop" id="modePop" hidden>
+    <button data-mode="hand"><span>✋</span>Рука</button>
+    <button data-mode="move" class="active"><span>✥</span>Перемещение</button>
+    <button data-mode="wire"><span>⁄</span>Провод</button>
+    <button data-mode="erase"><span>⌫</span>Стереть</button>
+  </div>
 
   <!-- =========================== Меню ============================== -->
   <div class="menu-pop" id="menuPop" hidden>
@@ -155,6 +170,13 @@
       <div class="seg" id="skinSeg">
         <button data-skin="real">Детали</button>
         <button data-skin="schema">Схема</button>
+      </div>
+    </div>
+    <div class="menu-seg">
+      <span>Язык</span>
+      <div class="seg" id="langSeg">
+        <button data-lang="ru" class="on">Русский</button>
+        <button data-lang="en">English</button>
       </div>
     </div>
     <hr>
@@ -243,6 +265,14 @@
         <button class="icon-btn" id="helpClose">✕</button>
       </div>
       <div class="modal-body">
+        <h3>Режимы работы</h3>
+        <ul>
+          <li><b>Рука</b> — ничего не меняет: кнопки нажимаются, выключатели щёлкают, детали остаются на местах.</li>
+          <li><b>Перемещение</b> — двигать детали. Нажатие на провод подсвечивает его и показывает, откуда и куда он идёт.</li>
+          <li><b>Провод</b> — тянуть провода от вывода к выводу. Нажатие на провод спросит, удалить ли его; Shift с нажатием удаляет сразу.</li>
+          <li><b>Стереть</b> — удалять детали, тоже с вопросом.</li>
+          <li>На кончике каждого вывода виден кружок цвета подключённого к нему провода — по нему сразу понятно, что куда идёт.</li>
+        </ul>
         <h3>Сборка схемы</h3>
         <ul>
           <li>Коснитесь элемента в палитре, затем рабочего стола — элемент встанет на сетку.</li>
@@ -261,7 +291,7 @@
         <h3>Клавиши</h3>
         <table class="keys">
           <tr><td>Пробел</td><td>пуск / пауза</td></tr>
-          <tr><td>V / W / E</td><td>выбор / провод / стирание</td></tr>
+          <tr><td>H / V / W / E</td><td>рука / перемещение / провод / стирание</td></tr>
           <tr><td>R</td><td>повернуть элемент</td></tr>
           <tr><td>D</td><td>переключить вид стола</td></tr>
           <tr><td>Delete</td><td>удалить выделенное</td></tr>
@@ -291,6 +321,7 @@
 </div>
 
 <script src="js/util.js"></script>
+<script src="js/i18n.js"></script>
 <script src="js/solver.js"></script>
 <script src="js/cpu.js"></script>
 <script src="js/components.js"></script>

@@ -19,22 +19,24 @@
     var v = Math.abs(value);
     if (v === 0) return '0';
     if (v < 1e-15) return '0';                 // ниже фемто показывать нечего
-    var p = PREFIXES[PREFIXES.length - 1];
+    var p = PREFIXES[PREFIXES.length - 1], pi = PREFIXES.length - 1;
     for (var i = 0; i < PREFIXES.length; i++) {
-      if (v >= Math.pow(10, PREFIXES[i].e)) { p = PREFIXES[i]; break; }
+      if (v >= Math.pow(10, PREFIXES[i].e)) { p = PREFIXES[i]; pi = i; break; }
     }
+    var table = EC.SI_PREFIX && EC.SI_PREFIX[EC.lang];
+    var suffix = table ? table[pi] : p.s;
     var scaled = v / Math.pow(10, p.e);
     var out;
     if (scaled >= 100) out = scaled.toFixed(Math.max(0, digits - 3));
     else if (scaled >= 10) out = scaled.toFixed(Math.max(0, digits - 2));
     else out = scaled.toFixed(Math.max(0, digits - 1));
     if (out.indexOf('.') >= 0) out = out.replace(/\.?0+$/, '');
-    return sign + out + p.s;
+    return sign + out + suffix;
   }
 
   /** Значение с единицей измерения: fmtUnit(0.0047,'Ф') -> "4.7мФ". */
   function fmtUnit(value, unit, digits) {
-    return fmtSI(value, digits) + (unit || '');
+    return fmtSI(value, digits) + (EC.t ? EC.t(unit || '') : (unit || ''));
   }
 
   var PARSE_MAP = {

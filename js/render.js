@@ -84,6 +84,7 @@
     var tl = this.toWorld(0, 0), br = this.toWorld(this.width, this.height);
     this.viewRect = { x0: tl.x - 3, y0: tl.y - 3, x1: br.x + 3, y1: br.y + 3 };
     this.updateVoltScale(dtReal);
+    this.buildPinColors();
     g.save();
     g.translate(v.x, v.y);
     g.scale(v.zoom, v.zoom);
@@ -93,6 +94,22 @@
     this.drawOverlay(g);
     g.restore();
     g.restore();
+  };
+
+  /**
+   * Какие провода приходят на каждый вывод. Кружок цвета провода на
+   * кончике вывода сразу показывает, что куда подключено, — даже когда
+   * провода идут рядом и разобрать их на глаз трудно.
+   */
+  Renderer.prototype.buildPinColors = function () {
+    var map = {}, ws = this.circuit.wires;
+    for (var i = 0; i < ws.length; i++) {
+      var w = ws[i];
+      var ka = w.a.c + '#' + w.a.p, kb = w.b.c + '#' + w.b.p;
+      (map[ka] || (map[ka] = [])).push(w.color || 0);
+      (map[kb] || (map[kb] = [])).push(w.color || 0);
+    }
+    this.pinColors = map;
   };
 
   Renderer.prototype.drawBackground = function (g) {
@@ -218,8 +235,38 @@
         this.strokePoly(g, pts, -0.9);
       }
 
+      if (sel) this.drawWireEnds(g, w, pts);
       if (sel && pts.length === 4) this.drawWireHandle(g, pts);
       if (this.options.showCurrent && this.running) this.drawCurrentFlow(g, w, pts, this.simRunning ? dtReal : 0);
+    }
+  };
+
+  /** Название детали и вывода на обоих концах выделенного провода. */
+  Renderer.prototype.drawWireEnds = function (g, w, pts) {
+    var ct = this.circuit;
+    var ends = [{ t: w.a, p: pts[0] }, { t: w.b, p: pts[pts.length - 1] }];
+    for (var k = 0; k < ends.length; k++) {
+      var c = ct.byId(ends[k].t.c);
+      if (!c) continue;
+      var pin = c.def().pins[ends[k].t.p];
+      var text = (c.name || EC.t(c.def().name)) +
+        (pin && pin.name ? ' · ' + EC.t(pin.name) : '');
+      var x = ends[k].p.x, y = ends[k].p.y;
+      g.font = '600 9px ui-monospace, Menlo, monospace';
+      var tw = g.measureText(text).width + 10;
+      g.fillStyle = 'rgba(18,54,46,.92)';
+      EC.gfx.roundRect(g, x - tw / 2, y - 26, tw, 14, 4);
+      g.fill();
+      g.strokeStyle = 'rgba(126,240,208,.75)';
+      g.lineWidth = 1;
+      EC.gfx.roundRect(g, x - tw / 2, y - 26, tw, 14, 4);
+      g.stroke();
+      g.fillStyle = 'rgba(232,252,244,.95)';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(text, x, y - 18.5);
+      g.beginPath(); g.arc(x, y, 4, 0, 7);
+      g.fillStyle = 'rgba(126,240,208,.9)'; g.fill();
     }
   };
 
@@ -400,6 +447,8 @@
       var p = c.pinPos(i);
       var connected = this.pinConnected(c, i);
       var hot = this.hoverPin && this.hoverPin.comp === c && this.hoverPin.pin === i;
+      var cols = this.pinColors && this.pinColors[c.id + '#' + i];
+      if (connected && cols && cols.length && !hot) this.drawPinDot(g, p, cols);
       if (!connected || hot) {
         g.beginPath();
         g.arc(p.x * GRID, p.y * GRID, hot ? 5 : 3, 0, 7);
@@ -425,6 +474,23 @@
     if (this.options.showValues && this.running && !def.tiny) this.drawBadge(g, c);
   };
 
+  /** Кружок цвета провода на кончике вывода; при двух проводах — с ободком. */
+  Renderer.prototype.drawPinDot = function (g, p, cols) {
+    if (this.view.zoom < 0.4) return;
+    var x = p.x * GRID, y = p.y * GRID;
+    var first = EC.WIRE_COLORS[cols[0]] || EC.WIRE_COLORS[0];
+    if (cols.length > 1) {                       // на выводе сходятся несколько
+      var second = EC.WIRE_COLORS[cols[1]] || first;
+      g.beginPath(); g.arc(x, y, 4.6, 0, 7);
+      g.fillStyle = second.core; g.fill();
+    }
+    g.beginPath(); g.arc(x, y, 3.2, 0, 7);
+    g.fillStyle = first.core; g.fill();
+    g.lineWidth = 0.9;
+    g.strokeStyle = 'rgba(8,16,14,.55)';
+    g.beginPath(); g.arc(x, y, 3.2, 0, 7); g.stroke();
+  };
+
   Renderer.prototype.pinConnected = function (c, i) {
     var ws = this.circuit.wires;
     for (var k = 0; k < ws.length; k++) {
@@ -438,10 +504,10 @@
     var def = c.def();
     if (def.measure || def.isGround || this.view.zoom < 0.55) return;
     var parts = [];
-    if (Math.abs(c.v || 0) >= 1e-3) parts.push(U.fmtSI(c.v, 3) + 'В');
-    if (Math.abs(c.i || 0) >= 1e-6) parts.push(U.fmtSI(Math.abs(c.i), 3) + 'А');
+    if (Math.abs(c.v || 0) >= 1e-3) parts.push(U.fmtSI(c.v, 3) + EC.t('В'));
+    if (Math.abs(c.i || 0) >= 1e-6) parts.push(U.fmtSI(Math.abs(c.i), 3) + EC.t('А'));
     var p = Math.abs(c.p || 0);
-    if (p >= 1e-4) parts.push(U.fmtSI(p, 3) + 'Вт');
+    if (p >= 1e-4) parts.push(U.fmtSI(p, 3) + EC.t('Вт'));
     if (!parts.length) return;
     var text = parts.join('  ');
     var b = c.bounds();

@@ -15,7 +15,11 @@
       var c = ct.add(p[0], p[1], p[2]);
       c.rot = p[3] || 0;
       var props = p[4] || {};
-      for (var k in props) c.props[k] = props[k];
+      // многострочные значения — это программы, их переводим вместе с языком
+      for (var k in props) {
+        var v = props[k];
+        c.props[k] = (typeof v === 'string' && v.indexOf('\n') >= 0 && EC.t) ? EC.t(v) : v;
+      }
       if (p[5]) c.name = p[5];
       map[p[6]] = c;
     });
