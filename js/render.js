@@ -83,6 +83,7 @@
     // видимая область в клетках сетки — всё за её пределами не рисуем
     var tl = this.toWorld(0, 0), br = this.toWorld(this.width, this.height);
     this.viewRect = { x0: tl.x - 3, y0: tl.y - 3, x1: br.x + 3, y1: br.y + 3 };
+    this.updateVoltScale(dtReal);
     g.save();
     g.translate(v.x, v.y);
     g.scale(v.zoom, v.zoom);
@@ -183,9 +184,25 @@
     g.stroke();
   };
 
+  /**
+   * Диапазон окраски по потенциалу подстраивается под схему:
+   * и цепь на 3 В, и сеть на 230 В получают полную палитру.
+   */
+  Renderer.prototype.updateVoltScale = function (dtReal) {
+    var x = this.circuit.x, n = this.circuit.nodeCount || 0, m = 0;
+    for (var i = 0; i < n; i++) {
+      var a = Math.abs(x[i]);
+      if (a > m && a < 1e7) m = a;
+    }
+    var target = Math.max(m, 1);
+    if (this._vscale === undefined) this._vscale = target;
+    // вверх подстраиваемся быстро, вниз — плавно, чтобы цвета не мигали
+    var k = target > this._vscale ? 0.5 : 0.04;
+    this._vscale += (target - this._vscale) * Math.min(k * (dtReal || 0.016) * 60, 1);
+  };
+
   Renderer.prototype.voltScale = function () {
-    if (this._vscale === undefined) this._vscale = 12;
-    return this._vscale;
+    return this._vscale === undefined ? 12 : this._vscale;
   };
 
   Renderer.prototype.wireVoltage = function (w) {

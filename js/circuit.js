@@ -266,6 +266,7 @@
     this.buildWireGraph();
     this.nets = nets;
     this.terminals = terminals;
+    this.nodeCount = nodeCount;
     this.size = nodeCount + branchCount;
     this.hasNonlinear = this.components.some(function (cc) { return cc.def().nonlinear; });
     this.mna = this.size > 0 ? new SOL.MnaBuilder(this.size) : null;
