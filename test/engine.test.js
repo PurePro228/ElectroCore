@@ -325,6 +325,170 @@ test('Ток в проводах (первый закон Кирхгофа)', fu
   check('ток в проводе = ток нагрузки', Math.abs(w1.current), 0.03, 1e-5);
 });
 
+test('Предохранитель перегорает при перегрузке', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 12; bat.props.Rint = 1e-6;
+  const fu = ct.add('fuse', 6, 0); fu.props.In = 0.5;
+  const r = ct.add('resistor', 12, 0); r.props.R = 100;   // 120 мА — норма
+  const gnd = ct.add('ground', 0, 6);
+  ct.connect(bat.id, 0, fu.id, 0);
+  ct.connect(fu.id, 1, r.id, 0);
+  ct.connect(r.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 1, 1e-4);
+  check('в норме не перегорает', fu.state.blown ? 0 : 1, 1, 0);
+  check('ток проходит', Math.abs(fu.i), 0.12, 0.002);
+  r.props.R = 5;                                           // 2,4 А — перегрузка
+  run(ct, 1, 1e-4);
+  check('перегорел при перегрузке', fu.state.blown ? 1 : 0, 1, 0);
+  check('цепь разорвана', Math.abs(fu.i) < 1e-6 ? 1 : 0, 1, 0);
+});
+
+test('Реле: срабатывание и коммутация нагрузки', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 12; bat.props.Rint = 1e-6;
+  const sw = ct.add('switch', 6, -6);
+  const k = ct.add('relay', 14, 0); k.props.Rcoil = 200; k.props.Ion = 0.03;
+  const lamp = ct.add('lamp', 24, 0); lamp.props.Vn = 12; lamp.props.Pn = 5;
+  const gnd = ct.add('ground', 0, 10);
+  ct.connect(bat.id, 0, sw.id, 0);
+  ct.connect(sw.id, 1, k.id, 0);
+  ct.connect(k.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 0, k.id, 2);
+  ct.connect(k.id, 3, lamp.id, 0);
+  ct.connect(lamp.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 0.2, 1e-4);
+  check('катушка обесточена — лампа не горит', Math.abs(lamp.i) < 1e-6 ? 1 : 0, 1, 0);
+  sw.props.closed = true;
+  run(ct, 1.5, 1e-4);
+  check('ток катушки 12 В / 200 Ω', Math.abs(k.i), 0.06, 0.002);
+  check('реле сработало', k.state.on ? 1 : 0, 1, 0);
+  check('лампа под нагрузкой ≈ 5 Вт', Math.abs(lamp.p), 5, 0.6);
+});
+
+test('Переключатель на два направления', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 9; bat.props.Rint = 1e-6;
+  const sa = ct.add('spdt', 8, 0);
+  const r1 = ct.add('resistor', 16, -6); r1.props.R = 100;
+  const r2 = ct.add('resistor', 16, 6); r2.props.R = 900;
+  const gnd = ct.add('ground', 0, 10);
+  ct.connect(bat.id, 0, sa.id, 0);
+  ct.connect(sa.id, 1, r1.id, 0);
+  ct.connect(sa.id, 2, r2.id, 0);
+  ct.connect(r1.id, 1, gnd.id, 0);
+  ct.connect(r2.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 1e-3);
+  check('позиция 1: ток через R1', Math.abs(r1.i), 0.09, 0.001);
+  check('позиция 1: R2 обесточен', Math.abs(r2.i) < 1e-7 ? 1 : 0, 1, 0);
+  sa.props.b = true;
+  run(ct, 1e-3);
+  check('позиция 2: ток через R2', Math.abs(r2.i), 0.01, 0.0002);
+  check('позиция 2: R1 обесточен', Math.abs(r1.i) < 1e-7 ? 1 : 0, 1, 0);
+});
+
+test('Полевой транзистор как ключ', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 12; bat.props.Rint = 1e-6;
+  const gate = ct.add('vsource', 0, 10);
+  gate.props.wave = 'dc'; gate.props.amp = 0; gate.props.Rint = 1e-6;
+  const r = ct.add('resistor', 8, -6); r.props.R = 100;
+  const q = ct.add('nmos', 16, 0); q.props.Vth = 2; q.props.K = 2;
+  const gnd = ct.add('ground', 0, 16);
+  ct.connect(bat.id, 0, r.id, 0);
+  ct.connect(r.id, 1, q.id, 1);
+  ct.connect(q.id, 2, gnd.id, 0);
+  ct.connect(gate.id, 0, q.id, 0);
+  ct.connect(gate.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 1e-3);
+  check('затвор 0 В — транзистор закрыт', Math.abs(q.i) < 1e-8 ? 1 : 0, 1, 0);
+  gate.props.amp = 10;
+  run(ct, 1e-3);
+  check('затвор 10 В — открыт', q.i, 0.12, 0.005);
+  check('Uси мало', q.v < 0.4 ? 1 : 0, 1, 0);
+});
+
+test('Транзистор PNP', function () {
+  // общий эмиттер на плюсе: база через резистор на землю
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 9; bat.props.Rint = 1e-6;
+  const rb = ct.add('resistor', 8, 6); rb.props.R = 470000;
+  const rc = ct.add('resistor', 8, -6); rc.props.R = 1000;
+  const q = ct.add('pnp', 16, 0); q.props.Bf = 100;
+  const gnd = ct.add('ground', 0, 12);
+  ct.connect(bat.id, 0, q.id, 2);        // эмиттер к плюсу
+  ct.connect(q.id, 0, rb.id, 0);         // база через резистор на землю
+  ct.connect(rb.id, 1, gnd.id, 0);
+  ct.connect(q.id, 1, rc.id, 0);         // коллектор через нагрузку на землю
+  ct.connect(rc.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 1e-3);
+  check('ток базы отрицателен (втекает из эмиттера)', q.ib < 0 ? 1 : 0, 1, 0);
+  check('β = Iк/Iб ≈ 100', q.ic / q.ib, 100, 12);
+  check('Iэ = −(Iк + Iб)', q.ie + q.ic + q.ib, 0, 1e-12);
+});
+
+test('Источник тока задаёт ток независимо от нагрузки', function () {
+  const ct = new EC.Circuit();
+  const src = ct.add('isource', 0, 0); src.props.I = 0.005;
+  const r = ct.add('resistor', 10, 0); r.props.R = 470;
+  const gnd = ct.add('ground', 0, 8);
+  ct.connect(src.id, 1, r.id, 0);
+  ct.connect(r.id, 1, gnd.id, 0);
+  ct.connect(src.id, 0, gnd.id, 0);
+  run(ct, 1e-3);
+  check('ток 5 мА', Math.abs(r.i), 0.005, 1e-6);
+  check('U = I·R', Math.abs(r.v), 0.005 * 470, 0.01);
+  r.props.R = 1200;
+  run(ct, 1e-3);
+  check('нагрузка выросла — ток тот же', Math.abs(r.i), 0.005, 1e-6);
+  check('напряжение выросло', Math.abs(r.v), 6.0, 0.02);
+});
+
+test('Кнопка замыкает цепь только при нажатии', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 5; bat.props.Rint = 1e-6;
+  const btn = ct.add('button', 8, 0);
+  const r = ct.add('resistor', 16, 0); r.props.R = 470;
+  const gnd = ct.add('ground', 0, 8);
+  ct.connect(bat.id, 0, btn.id, 0);
+  ct.connect(btn.id, 1, r.id, 0);
+  ct.connect(r.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 1e-3);
+  check('отпущена — тока нет', Math.abs(r.i) < 1e-8 ? 1 : 0, 1, 0);
+  btn.pressed = true;
+  run(ct, 1e-3);
+  check('нажата — ток 5 В / 470 Ω', Math.abs(r.i), 5 / 470, 1e-5);
+  btn.pressed = false;
+  run(ct, 1e-3);
+  check('снова отпущена — тока нет', Math.abs(r.i) < 1e-8 ? 1 : 0, 1, 0);
+  btn.props.nc = true;
+  run(ct, 1e-3);
+  check('нормально замкнутая — ток идёт без нажатия', Math.abs(r.i), 5 / 470, 1e-5);
+});
+
+test('Сохранение и загрузка схемы', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', 0, 0); bat.props.V = 7.5;
+  const r = ct.add('resistor', 8, 0); r.props.R = 330;
+  const gnd = ct.add('ground', 0, 8);
+  ct.connect(bat.id, 0, r.id, 0);
+  ct.connect(r.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  run(ct, 1e-3);
+  const i1 = r.i;
+  const copy = EC.Circuit.fromJSON(JSON.parse(JSON.stringify(ct.toJSON())));
+  run(copy, 1e-3);
+  const r2 = copy.components[1];
+  check('состав сохранён', copy.components.length, 3, 0);
+  check('связи сохранены', copy.wires.length, 3, 0);
+  check('расчёт совпадает', r2.i, i1, 1e-9);
+});
+
 console.log('\n' + '─'.repeat(50));
 console.log(failed === 0 ? `Все проверки пройдены: ${passed}` : `Пройдено ${passed}, провалено ${failed}`);
 process.exit(failed === 0 ? 0 : 1);
