@@ -44,6 +44,11 @@
     bindMobile();
 
     global.addEventListener('resize', onResize);
+    if (global.ResizeObserver) {
+      var ro = new ResizeObserver(onResize);
+      ro.observe(board.parentNode);
+      ro.observe(scopeCanvas.parentNode);
+    }
     onResize();
 
     var restored = loadLocal(true);
@@ -62,8 +67,8 @@
   }
 
   function onResize() {
-    renderer.resize();
-    scope.resize();
+    if (renderer.needsResize()) renderer.resize();
+    if (scope.needsResize()) scope.resize();
   }
 
   /* ================================================================== */
@@ -343,7 +348,7 @@
       if (c.def().scopeDefault) scope.add(c.id, 'v');
     });
     renderScopeChips();
-    if (scope.channels.length) $('scopePanel').classList.remove('collapsed');
+    if (scope.channels.length) { $('scopePanel').classList.remove('collapsed'); onResize(); }
     renderer.fit();
     state.running = true;
     updateRunUI();

@@ -114,6 +114,12 @@
     return { min: min, max: max, avg: avg, rms: rms, pp: max - min, freq: freq, last: pts[pts.length - 1].y };
   };
 
+  /** Совпадает ли буфер холста с его текущим размером на странице. */
+  Scope.prototype.needsResize = function () {
+    return Math.round(this.width || 0) !== this.canvas.clientWidth ||
+      Math.round(this.height || 0) !== this.canvas.clientHeight;
+  };
+
   Scope.prototype.resize = function () {
     var dpr = Math.min(global.devicePixelRatio || 1, 2.5);
     var rect = this.canvas.getBoundingClientRect();
@@ -123,9 +129,10 @@
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
   };
 
-  Scope.prototype.draw = function (now) {
+  Scope.prototype.draw = function () {
     var g = this.g;
-    if (!this.width) this.resize();
+    if (this.needsResize()) this.resize();
+    if (!this.width || !this.height) return;
     g.save();
     g.scale(this.dpr, this.dpr);
     var W = this.width, H = this.height;
@@ -193,7 +200,14 @@
     g.font = '600 9px ui-monospace, Menlo, monospace';
     g.fillStyle = 'rgba(160,210,195,.75)';
     g.textAlign = 'left'; g.textBaseline = 'top';
-    g.fillText(U.fmtSI(scale / 4, 3) + '/дел', x0 + 5, y0 + 4);
+    // единица подписывается, только когда все видимые каналы одинаковы
+    var unit = null, mixed = false;
+    for (i = 0; i < this.channels.length; i++) {
+      if (!this.channels[i].visible) continue;
+      var uu = this.unit(this.channels[i]);
+      if (unit === null) unit = uu; else if (unit !== uu) mixed = true;
+    }
+    g.fillText(U.fmtSI(scale / 4, 3) + (mixed || !unit ? '' : unit) + '/дел', x0 + 5, y0 + 4);
     g.textAlign = 'right';
     g.fillText(U.fmtSI(this.window / 10, 3) + 'с/дел', x0 + w - 5, y0 + 4);
     g.restore();

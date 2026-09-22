@@ -20,6 +20,11 @@
     this.simRunning = false;   // расчёт идёт прямо сейчас — оживляем ток
   }
 
+  Renderer.prototype.needsResize = function () {
+    return Math.round(this.width || 0) !== this.canvas.clientWidth ||
+      Math.round(this.height || 0) !== this.canvas.clientHeight;
+  };
+
   Renderer.prototype.resize = function () {
     var dpr = Math.min(global.devicePixelRatio || 1, 2.5);
     var rect = this.canvas.getBoundingClientRect();
@@ -68,6 +73,8 @@
   /* --------------------------- отрисовка ----------------------------- */
 
   Renderer.prototype.draw = function (dtReal) {
+    if (this.needsResize()) this.resize();
+    if (!this.width || !this.height) return;
     var g = this.g, v = this.view;
     g.save();
     g.scale(this.dpr, this.dpr);
