@@ -154,6 +154,7 @@
     'Добавлено на осциллограф': 'Added to the scope',
     'Ток на график': 'Current to chart',
     'Собрано: ': 'Assembled: ',
+    'свободно ': 'free ',
     'Строка ': 'Line ',
     'Выберите элемент и нажмите «На график»': 'Select a part and press “To chart”',
     'Схема не решается: проверьте наличие земли и разрывы цепи':
@@ -1335,5 +1336,82 @@
       'the supply is set by the Vcc setting, there are no separate power pins.',
     ' 10. ПРОВЕРЬ ПЕРЕД ОТВЕТОМ':
       ' 10. CHECK BEFORE YOU ANSWER',
+  });
+
+  /* --------------- как устроена память: для ИИ ------------------ */
+
+  add({
+    '(Z) и переноса (C). У EC-8 память своя, у EC-8B — внешняя.':
+      '(Z) and carry (C) flags. The EC-8 has its own memory, the EC-8B an external one.',
+    ' ПАМЯТЬ: ВОСЕМЬ БИТ АДРЕСА — ВСЕГО 256 ЯЧЕЕК':
+      ' MEMORY: EIGHT ADDRESS BITS — ONLY 256 CELLS',
+    'Шина адреса восьмибитная, поэтому вся память — 256 байт, от 0x00':
+      'The address bus is eight bits wide, so the whole memory is 256 bytes, from',
+    'до 0xFF. Больше нет и не будет. В этих же 256 байтах лежит ВСЁ':
+      '0x00 to 0xFF. There is no more and there never will be. Those same 256 bytes',
+    'сразу: и программа, и переменные, и стек. Отдельной памяти для':
+      'hold EVERYTHING at once: the program, the variables and the stack. There is',
+    'данных не существует.':
+      'no separate memory for data.',
+    '  0x00        отсюда начинается программа и идёт подряд':
+      '  0x00        the program starts here and runs on from there',
+    '  …           команда без операнда — 1 байт, с операндом — 2':
+      '  …           an instruction without an operand is 1 byte, with one 2',
+    '  за концом   свободное место, вот его и бери под переменные':
+      '  past the end  free space — this is what you take variables from',
+    '  0xFD…0xFF   у EC-8 здесь работает стек возвратов, не трогай':
+      '  0xFD…0xFF   on the EC-8 the return stack lives here, leave it alone',
+    'ПОСЧИТАЙ ДЛИНУ ПРОГРАММЫ, ПРЕЖДЕ ЧЕМ ВЫБИРАТЬ АДРЕСА.':
+      'COUNT THE LENGTH OF THE PROGRAM BEFORE YOU PICK ADDRESSES.',
+    '  по 2 байта: LDI LD ST ADDI SUBI ANDI ORI CMPI JMP JZ JNZ JC':
+      '  2 bytes each: LDI LD ST ADDI SUBI ANDI ORI CMPI JMP JZ JNZ JC',
+    '  по 1 байту: NOP TAB TBA ADD SUB AND OR XOR INC DEC SHL SHR':
+      '  1 byte each:  NOP TAB TBA ADD SUB AND OR XOR INC DEC SHL SHR',
+    'Сорок команд с операндом — это уже 80 байт. Сотня строк кода':
+      'Forty instructions with operands already make 80 bytes. A hundred lines of',
+    'легко занимает 150…200 байт, и свободного места остаётся мало.':
+      'code easily take 150…200 bytes, and little free space is left.',
+    'САМАЯ ЧАСТАЯ ОШИБКА — ПЕРЕМЕННАЯ ВНУТРИ ПРОГРАММЫ.':
+      'THE COMMONEST MISTAKE IS A VARIABLE INSIDE THE PROGRAM.',
+    'Если программа занимает 180 байт, то ST 0x80 пишет в 128-ю':
+      'If the program takes 180 bytes then ST 0x80 writes into cell 128 — that is,',
+    'ячейку — то есть прямо в середину собственного кода. Программа':
+      'straight into the middle of its own code. The program starts corrupting',
+    'начнёт портить сама себя, и схема будет вести себя бессмысленно.':
+      'itself and the circuit behaves senselessly. The simulator notices this and',
+    'Симулятор такое замечает и пишет об этом в свойствах детали, но':
+      'says so in the part\'s properties, but better not to get there.',
+    'лучше не доводить.':
+      '',
+    'ПРОСТОЕ ПРАВИЛО, КОТОРОЕ ВСЕГДА РАБОТАЕТ:':
+      'A SIMPLE RULE THAT ALWAYS WORKS:',
+    '  1. Держи программу короче 200 байт.':
+      '  1. Keep the program under 200 bytes.',
+    '  2. Переменные бери подряд сверху: 0xF0, 0xF1, 0xF2 и дальше':
+      '  2. Take variables from the top in order: 0xF0, 0xF1, 0xF2 and on',
+    '     до 0xFC. Их там тринадцать — этого хватает почти всегда.':
+      '     up to 0xFC. That is thirteen of them — almost always enough.',
+    '  3. Нужно больше тринадцати переменных или программа длиннее':
+      '  3. If you need more than thirteen variables, or the program runs past',
+    '     200 байт — не расширяй таблицы, а упрощай задачу: повторы':
+      '     200 bytes, do not grow the tables — simplify the task: move repeats',
+    '     выноси в подпрограммы, счётчики переиспользуй.':
+      '     into subroutines and reuse the counters.',
+    'У EC-8B стек аппаратный, на восемь уровней, память он не':
+      'On the EC-8B the stack is hardware, eight levels deep, and takes no',
+    'занимает — там свободны и 0xFD…0xFF. Микросхема памяти хоть и':
+      'memory — 0xFD…0xFF are free there too. The memory chip holds 1024 bytes,',
+    'на 1024 байта, но процессор дотягивается только до первых 256:':
+      'but the processor only reaches the first 256: it has no more than eight',
+    'больше восьми разрядов адреса у него нет.':
+      'address bits.',
+    'Возвраты из подпрограмм у обеих машин хранит стек, поэтому CALL':
+      'Return addresses on both machines are kept by the stack, so CALL always',
+    'работает всегда. Глубина — восемь вложенных вызовов.':
+      'works. The depth is eight nested calls.',
+    '  [ ] длина программы посчитана, а переменные лежат выше её':
+      '  [ ] the program length is counted and the variables sit above its',
+    '      конца — иначе программа затрёт сама себя':
+      '      end — otherwise the program overwrites itself',
   });
 })(window);

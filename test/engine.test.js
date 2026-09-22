@@ -1800,6 +1800,45 @@ test('Пример «Точка бежит по матрице 8×8»', function
   check('точка шла по порядку', spots.every((v, i) => i === 0 || v > spots[i - 1]) ? 1 : 0, 1, 0);
 });
 
+
+test('Ассемблер предупреждает о переменной внутри программы', function () {
+  const A = EC.cpu.assemble;
+  let r = A('LDI 5\nST 0x02\nHLT');
+  check('короткая программа собралась', r.ok ? 1 : 0, 1, 0);
+  check('свободное место посчитано', r.free, 256 - r.size, 0);
+  check('запись внутрь программы замечена', r.warnings.length, 1, 0);
+  check('предупреждение указывает строку', r.warnings[0].line, 2, 0);
+
+  let long = '';
+  for (let i = 0; i < 90; i++) long += 'LDI ' + (i & 0xFF) + '\n';
+  long += 'ST 0x80\nLD 0x80\nHLT';
+  r = A(long);
+  check('длинная программа занимает 185 байт', r.size, 185, 0);
+  check('обе ссылки на 0x80 отмечены', r.warnings.length, 2, 0);
+
+  // чтение таблицы по метке — это нормально, запись в неё — нет
+  r = A('данные: DB 1 2 3\nстарт:  LD данные\n        HLT');
+  check('чтение своей таблицы не пугает', r.warnings.length, 0, 0);
+  r = A('данные: DB 1 2 3\nстарт:  ST данные\n        HLT');
+  check('запись в таблицу отмечена', r.warnings.length, 1, 0);
+
+  r = A('LDI 1\nST 0xFF\nHLT');
+  check('запись в область стека отмечена', r.warnings.length, 1, 0);
+
+  r = A('LDI 1\nST 0xF0\nLD 0xF0\nHLT');
+  check('нормальная программа без замечаний', r.warnings.length, 0, 0);
+
+  // ни один пример не должен ругаться
+  let bad = 0;
+  EC.examples.forEach(function (ex) {
+    ex.make().components.forEach(function (c) {
+      const a = c.state && c.state.asm;
+      if (a && a.warnings && a.warnings.length) bad++;
+    });
+  });
+  check('во всех примерах память разложена верно', bad, 0, 0);
+});
+
 test('Английский перевод покрывает всё, что видит человек', function () {
   const d = EC.i18n.en;
   const cyr = /[А-Яа-яЁё]/;

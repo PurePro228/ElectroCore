@@ -119,6 +119,31 @@
   ];
   function glowRGB(c) { return GLOW_COLORS[c.props.color] || GLOW_COLORS.red; }
 
+  /**
+   * Корпус светодиодной матрицы: белый пластик с утопленными точками —
+   * так выглядят самые ходовые модули 1088AS.
+   */
+  function matrixBody(g, c, w, h) {
+    var def = c.def();
+    def.pins.forEach(function (p) {
+      lead(g, p.x * GRID, p.y * GRID, p.x * GRID, (p.y > 0 ? h / 2 : -h / 2));
+    });
+    g.fillStyle = 'rgba(16,36,28,.16)';          // тень под корпусом
+    roundRect(g, -w / 2 + 3, -h / 2 + 4, w, h, 4); g.fill();
+    g.fillStyle = gfx.grad(g, 'mtxBody', 0, -h / 2, 0, h / 2, [
+      [0, '#fbfbf8'], [0.45, '#eeefe9'], [1, '#dcdfd7']
+    ]);
+    roundRect(g, -w / 2, -h / 2, w, h, 4); g.fill();
+    g.strokeStyle = 'rgba(120,128,118,.55)';
+    g.lineWidth = 1.2;
+    roundRect(g, -w / 2, -h / 2, w, h, 4); g.stroke();
+    // фаска у первого вывода
+    g.fillStyle = 'rgba(150,158,148,.5)';
+    g.beginPath();
+    g.moveTo(-w / 2, h / 2 - 9); g.lineTo(-w / 2 + 9, h / 2); g.lineTo(-w / 2, h / 2);
+    g.closePath(); g.fill();
+  }
+
   /** Корпус индикатора: чёрная рамка с матовым окном. */
   function displayBody(g, c, w, h) {
     var def = c.def();
@@ -698,11 +723,11 @@
     },
     draw: function (g, c) {
       var w = 26 * GRID, h = 26 * GRID;
-      displayBody(g, c, w, h);
+      matrixBody(g, c, w, h);
       var step = w * 0.108, r0 = step * 0.33;
       var rgb = glowRGB(c), r, k, x, y, v;
       // погасшие точки рисуем одним путём — их всегда большинство
-      g.fillStyle = 'rgba(30,34,40,.9)';
+      g.fillStyle = 'rgba(' + rgb + ',.2)';
       g.beginPath();
       for (r = 0; r < 8; r++) {
         for (k = 0; k < 8; k++) {
@@ -714,16 +739,21 @@
         }
       }
       g.fill();
+      g.strokeStyle = 'rgba(120,128,118,.35)';   // утопленный ободок линзы
+      g.lineWidth = 0.9;
+      g.stroke();
       for (r = 0; r < 8; r++) {
         for (k = 0; k < 8; k++) {
           v = U.clamp((c.state && c.state.lit[r][k]) || 0, 0, 1.3);
           if (v <= 0.02) continue;
           x = (k - 3.5) * step; y = (r - 3.5) * step;
-          g.fillStyle = 'rgba(' + rgb + ',' + (0.35 + 0.6 * Math.min(v, 1)) + ')';
-          g.shadowColor = 'rgba(' + rgb + ',' + (0.6 * Math.min(v, 1)) + ')';
-          g.shadowBlur = step * 0.7;
+          g.fillStyle = 'rgba(' + rgb + ',' + (0.55 + 0.45 * Math.min(v, 1)) + ')';
+          g.shadowColor = 'rgba(' + rgb + ',' + (0.7 * Math.min(v, 1)) + ')';
+          g.shadowBlur = step * 0.8;
           g.beginPath(); g.arc(x, y, r0, 0, 7); g.fill();
           g.shadowBlur = 0;
+          g.fillStyle = 'rgba(255,255,255,' + (0.35 * Math.min(v, 1)) + ')';
+          g.beginPath(); g.arc(x - r0 * 0.25, y - r0 * 0.3, r0 * 0.42, 0, 7); g.fill();
         }
       }
       label(g, c, [c.name || ''], h / 2 + GRID * 0.9);

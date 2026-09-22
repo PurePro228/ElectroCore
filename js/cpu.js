@@ -76,11 +76,12 @@
    */
   function assemble(text) {
     var src = String(text || '').split(/\r?\n/);
-    var labels = {}, errors = [];
+    var labels = {}, errors = [], warnings = [];
     var items = [];                            // разобранные строки
     var addr = 0, i;
 
     function fail(line, msg) { errors.push({ line: line + 1, msg: msg }); }
+    function warn(line, msg) { warnings.push({ line: line + 1, msg: msg }); }
 
     // первый проход: метки и размеры
     for (i = 0; i < src.length; i++) {
@@ -142,13 +143,43 @@
       return 0;
     }
 
+    checkData();
+
+    /**
+     * Самая частая беда: переменную кладут по адресу, который уже занят
+     * программой, и та начинает портить сама себя. Адресов всего 256 на
+     * всё сразу, поэтому проверяем каждое обращение к памяти.
+     */
+    function checkData() {
+      if (errors.length) return;
+      var taken = {};
+      for (var k in labels) if (labels.hasOwnProperty(k)) taken[labels[k]] = k;
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j];
+        if (!it || !it.def) continue;
+        if (it.def.op !== 0x02 && it.def.op !== 0x03) continue;   // только LD и ST
+        var byLabel = labels[it.arg] !== undefined;
+        var a = byLabel ? labels[it.arg] : parseNumber(it.arg);
+        if (a === null || a === undefined) continue;
+        var store = it.def.op === 0x03;
+        if (a < addr && (store || !byLabel)) {
+          warn(it.line, 'ячейка 0x' + hex(a) + ' лежит внутри программы — она занимает ' +
+            addr + ' байт, и запись туда испортит сам код. Возьми адрес выше 0x' + hex(addr));
+        } else if (a >= 0xFD) {
+          warn(it.line, 'ячейка 0x' + hex(a) + ' отведена под стек возвратов');
+        }
+      }
+    }
+
     return {
       ok: errors.length === 0,
       code: code,
       size: addr,
+      free: MEM_SIZE - addr,
       lines: lines,
       labels: labels,
-      errors: errors
+      errors: errors,
+      warnings: warnings
     };
   }
 

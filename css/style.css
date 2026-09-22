@@ -624,6 +624,7 @@ input[type=range]::-moz-range-thumb {
 }
 .code-err.ok { color: var(--text-mute); }
 .code-err.bad { color: var(--danger); }
+.code-err.warn { color: #d08a2c; }
 
 .ai-steps { margin: 14px 0 0; padding-left: 20px; }
 .ai-steps li { margin-bottom: 16px; line-height: 1.6; }

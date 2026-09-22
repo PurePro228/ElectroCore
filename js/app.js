@@ -1258,13 +1258,19 @@
       var err = U.el('div', { class: 'code-err' });
       function assembleNow() {
         var res = EC.cpu.assemble(ta.value);
-        if (res.ok) {
-          err.className = 'code-err ok';
-          err.textContent = t('Собрано: ') + res.size + t(' байт');
-        } else {
+        if (!res.ok) {
           err.className = 'code-err bad';
           err.textContent = t('Строка ') + res.errors[0].line + ': ' + res.errors[0].msg;
+          return;
         }
+        if (res.warnings && res.warnings.length) {
+          err.className = 'code-err warn';
+          err.textContent = t('Строка ') + res.warnings[0].line + ': ' + res.warnings[0].msg;
+          return;
+        }
+        err.className = 'code-err ok';
+        err.textContent = t('Собрано: ') + res.size + t(' байт') +
+          ', ' + t('свободно ') + res.free;
       }
       ta.addEventListener('input', assembleNow);
       ta.addEventListener('change', function () {

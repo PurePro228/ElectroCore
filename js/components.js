@@ -2270,6 +2270,7 @@
     c.state.asm = res;
     if (res.ok) EC.cpu.load(c.state.m, res.code);
     c.asmError = res.ok ? null : res.errors[0];
+    c.asmWarn = (res.ok && res.warnings.length) ? res.warnings[0] : null;
   }
 
   define({
@@ -2387,7 +2388,7 @@
       c.i = iCore;
       c.warn = (st.asm && !st.asm.ok)
         ? 'Ошибка в программе, строка ' + st.asm.errors[0].line + ': ' + st.asm.errors[0].msg
-        : (mach.halted ? null : null);
+        : (c.asmWarn ? 'Строка ' + c.asmWarn.line + ': ' + c.asmWarn.msg : null);
     },
     draw: function (g, c) {
       var w = GRID * 3.4, h = GRID * 7;
@@ -2676,6 +2677,7 @@
     c.state.bytes = new Uint8Array(MEM_BYTES);
     if (res.ok) c.state.bytes.set(res.code, 0);
     c.asmError = res.ok ? null : res.errors[0];
+    c.asmWarn = (res.ok && res.warnings.length) ? res.warnings[0] : null;
   }
 
   define({
@@ -2743,7 +2745,7 @@
       c.byte = st.out;
       c.warn = (st.asm && !st.asm.ok)
         ? 'Ошибка в содержимом, строка ' + st.asm.errors[0].line + ': ' + st.asm.errors[0].msg
-        : null;
+        : (c.asmWarn ? 'Строка ' + c.asmWarn.line + ': ' + c.asmWarn.msg : null);
       c.pinI = null;
     },
     draw: function (g, c) {
