@@ -124,7 +124,13 @@
     Array.prototype.forEach.call(document.querySelectorAll('.pal-item'), function (n) {
       n.classList.toggle('armed', n.getAttribute('data-type') === type);
     });
+    if (isPhone()) {
+      hideSheets();
+      toast('Коснитесь стола, чтобы поставить «' + EC.defs[type].name + '»');
+    }
   }
+
+  function isPhone() { return global.innerWidth <= 720; }
   function disarm() {
     state.armed = null;
     renderer.ghost = null;
@@ -489,7 +495,8 @@
       return;
     }
 
-    var pin = renderer.pinAt(w.x, w.y, 0.75);
+    var touch = e.pointerType === 'touch';
+    var pin = renderer.pinAt(w.x, w.y, touch ? 1.25 : 0.75);
     var comp = renderer.componentAt(w.x, w.y);
     var wire = pin ? null : renderer.wireAt(w.x, w.y);
 
@@ -502,7 +509,7 @@
 
     if (pin && (state.mode === 'wire' || state.mode === 'select')) {
       state.action = {
-        type: 'wire', from: pin, moved: false,
+        type: 'wire', from: pin, moved: false, touch: touch,
         horizFirst: Math.abs(pin.comp.def().pins[pin.pin].x) >= Math.abs(pin.comp.def().pins[pin.pin].y)
       };
       renderer.pendingWire = { from: pin, to: w, horizFirst: state.action.horizFirst };
@@ -514,6 +521,7 @@
         renderer.selection = e.shiftKey ? renderer.selection.concat([comp]) : [comp];
       }
       updateInspector();
+      markInspectorAvailable();
       var def = comp.def();
       if (def.momentary) { comp.pressed = true; }
       state.action = {
@@ -573,7 +581,7 @@
     }
     if (act.type === 'wire') {
       act.moved = true;
-      var target = renderer.pinAt(w.x, w.y, 0.8);
+      var target = renderer.pinAt(w.x, w.y, act.touch ? 1.4 : 0.8);
       renderer.hoverPin = target;
       renderer.pendingWire.to = target ? target.pos : w;
       return;
@@ -603,7 +611,7 @@
 
     if (act) {
       if (act.type === 'wire') {
-        var target = renderer.pinAt(w.x, w.y, 0.9);
+        var target = renderer.pinAt(w.x, w.y, act.touch ? 1.5 : 0.9);
         if (target && !(target.comp === act.from.comp && target.pin === act.from.pin)) {
           pushUndo();
           circuit.connect(act.from.comp.id, act.from.pin, target.comp.id, target.pin);
@@ -1040,6 +1048,12 @@
     });
   }
 
+  /** Подсвечивает кнопку «Свойства» на телефоне, когда есть что показать. */
+  function markInspectorAvailable() {
+    var b = document.querySelector('.mb[data-sheet="inspector"]');
+    if (b) b.classList.add('active');
+  }
+
   function toggleSheet(name) {
     var panel = $(name);
     var open = panel.classList.contains('open');
@@ -1050,6 +1064,8 @@
     }
   }
   function hideSheets() {
+    var ib = document.querySelector('.mb[data-sheet="inspector"]');
+    if (ib) ib.classList.remove('active');
     $('palette').classList.remove('open');
     $('inspector').classList.remove('open');
     $('backdrop').classList.remove('show');
@@ -1138,6 +1154,7 @@
       else if (spent < 5 && done >= steps) state.maxSteps = Math.min(8000, Math.round(state.maxSteps * 1.12) + 4);
     }
 
+    if (state.hasRun) circuit.refreshDisplay();
     renderer.running = state.hasRun;
     renderer.simRunning = state.running;
     renderer.draw(dtReal);

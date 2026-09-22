@@ -321,6 +321,7 @@ test('Ток в проводах (первый закон Кирхгофа)', fu
   ct.connect(r.id, 1, gnd.id, 0);
   ct.connect(bat.id, 1, gnd.id, 0);
   run(ct, 1e-3);
+  ct.refreshDisplay();
   check('ток в проводе = ток нагрузки', Math.abs(w1.current), 0.03, 1e-5);
 });
 

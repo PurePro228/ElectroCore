@@ -73,6 +73,9 @@
     g.scale(this.dpr, this.dpr);
     g.clearRect(0, 0, this.width, this.height);
     this.drawBackground(g);
+    // видимая область в клетках сетки — всё за её пределами не рисуем
+    var tl = this.toWorld(0, 0), br = this.toWorld(this.width, this.height);
+    this.viewRect = { x0: tl.x - 3, y0: tl.y - 3, x1: br.x + 3, y1: br.y + 3 };
     g.save();
     g.translate(v.x, v.y);
     g.scale(v.zoom, v.zoom);
@@ -118,6 +121,13 @@
 
   /* ------------------------------ провода ---------------------------- */
 
+  /** Пересекается ли прямоугольник с видимой областью. */
+  Renderer.prototype.visible = function (x0, y0, x1, y1) {
+    var r = this.viewRect;
+    if (!r) return true;
+    return x1 >= r.x0 && x0 <= r.x1 && y1 >= r.y0 && y0 <= r.y1;
+  };
+
   Renderer.prototype.drawWires = function (g, dtReal) {
     var ct = this.circuit, i, j;
     for (i = 0; i < ct.wires.length; i++) {
@@ -125,6 +135,12 @@
       var path = ct.wirePath(w);
       if (!path) continue;
       w._path = path;
+      var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      for (j = 0; j < path.length; j++) {
+        bx0 = Math.min(bx0, path[j].x); bx1 = Math.max(bx1, path[j].x);
+        by0 = Math.min(by0, path[j].y); by1 = Math.max(by1, path[j].y);
+      }
+      if (!this.visible(bx0, by0, bx1, by1)) continue;
       var pts = [];
       for (j = 0; j < path.length; j++) pts.push({ x: path[j].x * GRID, y: path[j].y * GRID });
 
@@ -227,6 +243,8 @@
 
   Renderer.prototype.drawComponent = function (g, c, selected) {
     var def = c.def();
+    var b0 = c.bounds();
+    if (!this.visible(b0.x, b0.y, b0.x + b0.w, b0.y + b0.h)) return;
     g.save();
     g.translate(c.x * GRID, c.y * GRID);
     g.rotate((c.rot || 0) * Math.PI / 2);

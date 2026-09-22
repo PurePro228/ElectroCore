@@ -114,6 +114,7 @@
     var c = new Component(type, x, y);
     c.name = this.autoName(type);
     this.components.push(c);
+    this._idMap = null;
     this.dirty = true;
     return c;
   };
@@ -129,14 +130,19 @@
     return pref + n;
   };
 
+  /** Поиск по идентификатору; указатель кешируется до изменения состава схемы. */
   Circuit.prototype.byId = function (id) {
-    for (var i = 0; i < this.components.length; i++) if (this.components[i].id === id) return this.components[i];
-    return null;
+    if (!this._idMap) {
+      this._idMap = {};
+      for (var i = 0; i < this.components.length; i++) this._idMap[this.components[i].id] = this.components[i];
+    }
+    return this._idMap[id] || null;
   };
 
   Circuit.prototype.remove = function (comp) {
     var idx = this.components.indexOf(comp);
     if (idx >= 0) this.components.splice(idx, 1);
+    this._idMap = null;
     this.wires = this.wires.filter(function (w) {
       return w.a.c !== comp.id && w.b.c !== comp.id;
     });
@@ -257,6 +263,7 @@
       else c.br = -1;
     }
 
+    this.buildWireGraph();
     this.nets = nets;
     this.terminals = terminals;
     this.size = nodeCount + branchCount;
@@ -349,57 +356,93 @@
       if (c.pinCount() === 2 && !c.def().pinIcustom) { c.pinI[0] = c.i; c.pinI[1] = -c.i; }
       c.p = c.power();
     }
-    this.computeWireCurrents();
-    this.collectWarnings();
     return true;
   };
 
+  /** Величины, нужные только для отображения — обновляются раз в кадр. */
+  Circuit.prototype.refreshDisplay = function () {
+    if (this.dirty) return;
+    this.computeWireCurrents();
+    this.collectWarnings();
+  };
+
   /**
-   * Токи в проводах. Для дерева соединений задача решается точно
-   * последовательным «отрыванием листьев»; в контурах ток остаётся нулевым.
+   * Граф проводов: вершины — выводы элементов, рёбра — провода.
+   * Пересобирается только при изменении схемы.
+   */
+  Circuit.prototype.buildWireGraph = function () {
+    var vmap = {}, verts = [], edges = [];
+    var i, w, self = this;
+    function vertex(cid, pin) {
+      var k = cid + '#' + pin;
+      if (vmap[k] === undefined) {
+        vmap[k] = verts.length;
+        verts.push({ comp: self.byId(cid), pin: pin, inc: [] });
+      }
+      return vmap[k];
+    }
+    for (i = 0; i < this.wires.length; i++) {
+      w = this.wires[i];
+      if (!this.byId(w.a.c) || !this.byId(w.b.c)) { w.current = 0; continue; }
+      var va = vertex(w.a.c, w.a.p), vb = vertex(w.b.c, w.b.p);
+      var e = edges.length;
+      edges.push({ wire: w, a: va, b: vb });
+      verts[va].inc.push({ e: e, s: -1 });
+      verts[vb].inc.push({ e: e, s: 1 });
+    }
+    this._wg = {
+      verts: verts, edges: edges,
+      cur: new Float64Array(edges.length), done: new Uint8Array(edges.length),
+      left: new Int32Array(verts.length), acc: new Float64Array(verts.length),
+      out: new Float64Array(verts.length)
+    };
+  };
+
+  /**
+   * Токи в проводах. Для древовидных соединений задача решается точно
+   * последовательным «отрыванием листьев» за O(число проводов);
+   * в замкнутых контурах ток распределить однозначно нельзя — там остаётся ноль.
    */
   Circuit.prototype.computeWireCurrents = function () {
-    var i, w, wires = this.wires;
-    if (!wires.length) return;
-    var incident = {}, known = new Array(wires.length);
-    var valid = [];
-    for (i = 0; i < wires.length; i++) {
-      w = wires[i];
-      var ca = this.byId(w.a.c), cb = this.byId(w.b.c);
-      if (!ca || !cb) { known[i] = 0; w.current = 0; continue; }
-      valid.push(i);
-      known[i] = null;
-      var ka = key(w.a.c, w.a.p), kb = key(w.b.c, w.b.p);
-      (incident[ka] = incident[ka] || []).push({ w: i, s: -1 });
-      (incident[kb] = incident[kb] || []).push({ w: i, s: 1 });
+    var wg = this._wg;
+    if (!wg || !wg.edges.length) return;
+    var verts = wg.verts, edges = wg.edges;
+    var nv = verts.length, ne = edges.length;
+    var i, v, e;
+
+    var cur = wg.cur, done = wg.done;
+    var left = wg.left;                     // сколько неизвестных рёбер у вершины
+    var acc = wg.acc;                       // вклад уже найденных рёбер
+    var out = wg.out;                       // ток, уходящий из вершины в элемент
+    done.fill(0); acc.fill(0);
+    var queue = [];
+
+    for (v = 0; v < nv; v++) {
+      var vt = verts[v];
+      left[v] = vt.inc.length;
+      var c = vt.comp;
+      out[v] = (c && c.pinI && c.pinI[vt.pin] !== undefined) ? c.pinI[vt.pin] : 0;
+      if (left[v] === 1) queue.push(v);
     }
-    // ток, уходящий из узла провода в сам элемент
-    var out = {};
-    for (i = 0; i < this.components.length; i++) {
-      var c = this.components[i];
-      for (var p = 0; p < c.pinCount(); p++) {
-        out[key(c.id, p)] = (c.pinI && c.pinI[p] !== undefined) ? c.pinI[p] : 0;
-      }
+
+    for (var qi = 0; qi < queue.length; qi++) {
+      v = queue[qi];
+      if (left[v] !== 1) continue;
+      var inc = verts[v].inc, pick = null;
+      for (i = 0; i < inc.length; i++) if (!done[inc[i].e]) { pick = inc[i]; break; }
+      if (!pick) continue;
+      e = pick.e;
+      var val = (out[v] - acc[v]) / pick.s;
+      cur[e] = val;
+      done[e] = 1;
+      var ed = edges[e];
+      acc[ed.a] += -val; left[ed.a]--;
+      if (left[ed.a] === 1) queue.push(ed.a);
+      acc[ed.b] += val; left[ed.b]--;
+      if (left[ed.b] === 1) queue.push(ed.b);
     }
-    var progress = true, guard = 0;
-    while (progress && guard++ < wires.length + 4) {
-      progress = false;
-      for (var k in incident) {
-        var list = incident[k], unknown = null, sum = 0, cnt = 0;
-        for (i = 0; i < list.length; i++) {
-          if (known[list[i].w] === null) { unknown = list[i]; cnt++; }
-          else sum += list[i].s * known[list[i].w];
-        }
-        if (cnt === 1) {
-          known[unknown.w] = (out[k] - sum) / unknown.s;
-          progress = true;
-        }
-      }
-    }
-    for (i = 0; i < valid.length; i++) {
-      var idx = valid[i];
-      wires[idx].current = known[idx] === null ? 0 : known[idx];
-    }
+
+    for (e = 0; e < ne; e++) edges[e].wire.current = done[e] ? cur[e] : 0;
   };
 
   Circuit.prototype.collectWarnings = function () {

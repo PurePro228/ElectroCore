@@ -17,45 +17,63 @@
   /* ------------------------------------------------------------------ */
 
   /**
-   * Решает A*x = b на месте. A — массив Float64Array (строки), b — Float64Array.
-   * Возвращает true при успехе, false если матрица вырождена.
+   * LU-разложение матрицы на месте с частичным выбором главного элемента.
+   * Множители L хранятся ниже диагонали, perm — перестановка строк.
+   * Возвращает false, если матрица вырождена.
    */
-  function luSolve(A, b, n) {
-    var i, j, k, row, pivRow;
-    var perm = new Int32Array(n);
+  function luFactor(LU, n, perm) {
+    var i, j, k;
     for (i = 0; i < n; i++) perm[i] = i;
-
     for (k = 0; k < n; k++) {
-      // выбор главного элемента
       var maxAbs = 0, maxRow = -1;
       for (i = k; i < n; i++) {
-        var a = Math.abs(A[i][k]);
+        var a = Math.abs(LU[i][k]);
         if (a > maxAbs) { maxAbs = a; maxRow = i; }
       }
-      if (maxRow < 0 || maxAbs < 1e-20) return false; // вырожденная матрица
+      if (maxRow < 0 || maxAbs < 1e-20) return false;
       if (maxRow !== k) {
-        row = A[k]; A[k] = A[maxRow]; A[maxRow] = row;
-        var t = b[k]; b[k] = b[maxRow]; b[maxRow] = t;
+        var row = LU[k]; LU[k] = LU[maxRow]; LU[maxRow] = row;
+        var t = perm[k]; perm[k] = perm[maxRow]; perm[maxRow] = t;
       }
-      pivRow = A[k];
-      var piv = pivRow[k];
+      var piv = LU[k], pv = piv[k];
       for (i = k + 1; i < n; i++) {
-        row = A[i];
-        var f = row[k] / piv;
+        var ri = LU[i];
+        var f = ri[k] / pv;
+        ri[k] = f;
         if (f === 0) continue;
-        row[k] = 0;
-        for (j = k + 1; j < n; j++) row[j] -= f * pivRow[j];
-        b[i] -= f * b[k];
+        for (j = k + 1; j < n; j++) ri[j] -= f * piv[j];
       }
     }
-    // обратный ход
-    for (i = n - 1; i >= 0; i--) {
-      var sum = b[i];
-      row = A[i];
-      for (j = i + 1; j < n; j++) sum -= row[j] * b[j];
-      b[i] = sum / row[i];
-      if (!isFinite(b[i])) return false;
+    return true;
+  }
+
+  /** Прямая и обратная подстановка по готовому LU-разложению. */
+  function luApply(LU, perm, b, x, n) {
+    var i, j, sum;
+    for (i = 0; i < n; i++) x[i] = b[perm[i]];
+    for (i = 1; i < n; i++) {
+      sum = x[i];
+      var ri = LU[i];
+      for (j = 0; j < i; j++) sum -= ri[j] * x[j];
+      x[i] = sum;
     }
+    for (i = n - 1; i >= 0; i--) {
+      sum = x[i];
+      var rr = LU[i];
+      for (j = i + 1; j < n; j++) sum -= rr[j] * x[j];
+      x[i] = sum / rr[i];
+      if (!isFinite(x[i])) return false;
+    }
+    return true;
+  }
+
+  /** Решает A*x = b; A и b портятся. Результат остаётся в b. */
+  function luSolve(A, b, n) {
+    var perm = new Int32Array(n);
+    if (!luFactor(A, n, perm)) return false;
+    var x = new Float64Array(n);
+    if (!luApply(A, perm, b, x, n)) return false;
+    for (var i = 0; i < n; i++) b[i] = x[i];
     return true;
   }
 
@@ -67,6 +85,14 @@
     this.n = size;
     this.A = new Array(size);
     for (var i = 0; i < size; i++) this.A[i] = new Float64Array(size);
+    this.LU = new Array(size);
+    this.cachedA = new Array(size);
+    for (i = 0; i < size; i++) {
+      this.LU[i] = new Float64Array(size);
+      this.cachedA[i] = new Float64Array(size);
+    }
+    this.perm = new Int32Array(size);
+    this.factored = false;
     this.b = new Float64Array(size);
     this.x = new Float64Array(size);
   }
@@ -135,13 +161,30 @@
     }
   };
 
+  /**
+   * Решает систему. Если матрица не изменилась с прошлого раза
+   * (линейная схема, установившийся шаг), разложение переиспользуется —
+   * вместо O(n³) остаётся только подстановка O(n²).
+   */
   MnaBuilder.prototype.solve = function () {
-    var ok = luSolve(this.A, this.b, this.n);
-    if (!ok) return false;
-    for (var i = 0; i < this.n; i++) {
-      this.x[i] = this.b[i];
-      if (!isFinite(this.x[i])) return false;
+    var n = this.n, i, j;
+    var reuse = this.factored;
+    if (reuse) {
+      for (i = 0; i < n && reuse; i++) {
+        var a = this.A[i], ca = this.cachedA[i];
+        for (j = 0; j < n; j++) if (a[j] !== ca[j]) { reuse = false; break; }
+      }
     }
+    if (!reuse) {
+      for (i = 0; i < n; i++) {
+        this.LU[i].set(this.A[i]);
+        this.cachedA[i].set(this.A[i]);
+      }
+      if (!luFactor(this.LU, n, this.perm)) { this.factored = false; return false; }
+      this.factored = true;
+    }
+    if (!luApply(this.LU, this.perm, this.b, this.x, n)) { this.factored = false; return false; }
+    for (i = 0; i < n; i++) if (!isFinite(this.x[i])) { this.factored = false; return false; }
     return true;
   };
 
@@ -188,6 +231,8 @@
 
   EC.solver = {
     luSolve: luSolve,
+    luFactor: luFactor,
+    luApply: luApply,
     MnaBuilder: MnaBuilder,
     thermalVoltage: thermalVoltage,
     pnjlim: pnjlim,
