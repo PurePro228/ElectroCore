@@ -1330,6 +1330,44 @@ test('Такты обмена по шине', function () {
   check('обмен занял девять тактов', m.cycles, 9, 0);
 });
 
+
+test('Калькулятор: два процессора считают и передают ответ по одному проводу', function () {
+  const ct = EC.examples.find(e => e.id === 'calc').make();
+  const by = id => ct.components.find(c => c.name === id);
+  const led = by('HL1'), dd1 = by('DD1'), dd2 = by('DD2');
+  const SB = { 1: by('SB1'), 2: by('SB2'), 3: by('SB3') };
+  const dt = 4e-4;
+  let blinks = 0, wasOn = false;
+  const go = sec => {
+    for (let i = 0; i < Math.round(sec / dt); i++) {
+      ct.step(dt);
+      const on = led.i > 3e-3;
+      if (on && !wasOn) blinks++;
+      wasOn = on;
+    }
+  };
+  const press = n => { SB[n].pressed = true; go(0.08); SB[n].pressed = false; go(0.08); };
+
+  check('обе программы собраны', (dd1.state.asm.ok && dd2.state.asm.ok) ? 1 : 0, 1, 0);
+  go(0.3);
+  press(1); press(1); press(1);              // A = 3
+  press(2); press(2);                        // B = 2
+  check('первое слагаемое набрано', dd1.state.m.mem[240], 3, 0);
+  check('второе слагаемое набрано', dd1.state.m.mem[241], 2, 0);
+
+  blinks = 0;
+  press(3);                                  // равно
+  go(9);
+  check('светодиод мигнул пять раз', blinks, 5, 0);
+
+  // второй счёт подряд: 1 + 1
+  press(1); press(2);
+  blinks = 0;
+  press(3);
+  go(7);
+  check('вторая операция считается заново', blinks, 2, 0);
+});
+
 console.log('\n' + '─'.repeat(50));
 console.log(failed === 0 ? `Все проверки пройдены: ${passed}` : `Пройдено ${passed}, провалено ${failed}`);
 process.exit(failed === 0 ? 0 : 1);
