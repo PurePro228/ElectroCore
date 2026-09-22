@@ -32,7 +32,7 @@
     voltmeter: 'PV', ammeter: 'PA', wattmeter: 'PW', probe: 'X', ground: '', junction: '',
     thermistor: 'RK', photoresistor: 'RL', transformer: 'TV', schottky: 'VD', bridge: 'VD',
     regulator: 'DA', motor: 'M', buzzer: 'HA',
-    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD', cpu8: 'DD'
+    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD', cpu8: 'DD', cpu_bus: 'DD', memory: 'DD'
   };
 
   /* ------------------------------------------------------------------ */
@@ -84,6 +84,27 @@
     return {
       x: this.x + minX - pad, y: this.y + minY - pad,
       w: (maxX - minX) + pad * 2, h: (maxY - minY) + pad * 2
+    };
+  };
+
+  /**
+   * Прямоугольник самого корпуса, без выводов: по нему провода понимают,
+   * где деталь, и не лезут поперёк неё.
+   */
+  Component.prototype.body = function () {
+    var def = this.def();
+    var minX = 0, maxX = 0, minY = 0, maxY = 0;
+    for (var i = 0; i < def.pins.length; i++) {
+      var p = this.pinPos(i);
+      minX = Math.min(minX, p.x - this.x); maxX = Math.max(maxX, p.x - this.x);
+      minY = Math.min(minY, p.y - this.y); maxY = Math.max(maxY, p.y - this.y);
+    }
+    var lead = def.tiny ? 0.35 : 0.85;           // длина вывода от корпуса
+    var hw = Math.max((maxX - minX) / 2 - lead, 0.35);
+    var hh = Math.max((maxY - minY) / 2 - lead, 0.35);
+    return {
+      x: this.x + (minX + maxX) / 2 - hw, y: this.y + (minY + maxY) / 2 - hh,
+      w: hw * 2, h: hh * 2
     };
   };
 
@@ -200,9 +221,20 @@
 
   /** Вдоль какой оси отходит провод от вывода: 'h' или 'v'. */
   Circuit.prototype.pinAxis = function (comp, pinIndex) {
-    var pin = comp.def().pins[pinIndex];
+    var def = comp.def();
+    var pin = def.pins[pinIndex];
     if (!pin) return 'h';
-    var horiz = Math.abs(pin.x) >= Math.abs(pin.y);
+    if (def._span === undefined) {
+      var mx = 0, my = 0;
+      for (var i = 0; i < def.pins.length; i++) {
+        mx = Math.max(mx, Math.abs(def.pins[i].x));
+        my = Math.max(my, Math.abs(def.pins[i].y));
+      }
+      def._span = { x: mx, y: my };
+    }
+    var sx = def._span.x, sy = def._span.y;
+    var horiz = sx < 1e-9 ? false
+      : (sy < 1e-9 ? true : Math.abs(pin.x) / sx >= Math.abs(pin.y) / sy);
     if (comp.rot % 2 === 1) horiz = !horiz;
     return horiz ? 'h' : 'v';
   };
@@ -236,6 +268,17 @@
     return Math.max(0, Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo));
   }
 
+  /** Длина части отрезка, попавшей внутрь прямоугольника. */
+  function crossLen(seg, b) {
+    var x0 = b.x, x1 = b.x + b.w, y0 = b.y, y1 = b.y + b.h;
+    if (seg.horiz) {
+      if (seg.fixed <= y0 || seg.fixed >= y1) return 0;
+      return Math.max(0, Math.min(seg.hi, x1) - Math.max(seg.lo, x0));
+    }
+    if (seg.fixed <= x0 || seg.fixed >= x1) return 0;
+    return Math.max(0, Math.min(seg.hi, y1) - Math.max(seg.lo, y0));
+  }
+
   /** Есть ли у проводов общий вывод (тогда наложение у него неизбежно). */
   function sharesTerminal(w1, w2) {
     var t = [w1.a, w1.b], u = [w2.a, w2.b];
@@ -261,6 +304,21 @@
     return total;
   };
 
+  /** Длина участков маршрута, проходящих сквозь корпуса деталей. */
+  Circuit.prototype.routeCross = function (path) {
+    var segs = segmentsOf(path), total = 0;
+    for (var i = 0; i < this.components.length; i++) {
+      var b = this.components[i].body();
+      for (var k = 0; k < segs.length; k++) total += crossLen(segs[k], b);
+    }
+    return total;
+  };
+
+  /** Во что обходится маршрут: наложения плюс проход сквозь детали. */
+  Circuit.prototype.routeCost = function (wire, path) {
+    return this.routeOverlap(wire, path) + 2 * this.routeCross(path);
+  };
+
   /**
    * Подбирает маршрут целиком: ось и линию коврика. Если выводы смотрят
    * в одну сторону, эта сторона и задаёт ось; иначе берётся направление
@@ -279,7 +337,7 @@
       var mid = this.chooseMid(wire);
       wire.mid = mid;
       var path = this.wirePath(wire);
-      var score = (path ? this.routeOverlap(wire, path) : Infinity) + k * 0.1;
+      var score = (path ? this.routeCost(wire, path) : Infinity) + k * 0.1;
       if (!best || score < best.score) best = { axis: axis, mid: mid, score: score };
     }, this);
     wire.axis = best.axis;
@@ -299,7 +357,7 @@
         wire.mid = m;
         var path = this.wirePath(wire);
         // небольшая надбавка за удаление от середины: при прочих равных ближе
-        var score = path ? this.routeOverlap(wire, path) + d * 0.02 : Infinity;
+        var score = path ? this.routeCost(wire, path) + d * 0.02 : Infinity;
         if (score < bestScore) { bestScore = score; best = m; }
         if (bestScore <= 0.01) break;
       }
@@ -337,7 +395,7 @@
       var total = 0;
       for (i = 0; i < this.wires.length; i++) {
         var path = this.wirePath(this.wires[i]);
-        if (path) total += this.routeOverlap(this.wires[i], path);
+        if (path) total += this.routeCost(this.wires[i], path);
       }
       if (total <= 0.01 || total >= prev - 0.01) break;
       prev = total;

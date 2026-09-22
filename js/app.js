@@ -1024,7 +1024,8 @@
     rd.id = 'liveReadouts';
     ms.appendChild(rd);
     if (def.key === 'npn' || def.key === 'pnp' || def.key === 'nmos' ||
-      def.key === 'pmos' || def.key === 'cpu8') {
+      def.key === 'pmos' || def.key === 'cpu8' || def.key === 'cpu_bus' ||
+      def.key === 'memory') {
       ms.appendChild(U.el('div', { class: 'insp-tip', id: 'liveExtra' }));
     }
     body.appendChild(ms);
@@ -1033,7 +1034,7 @@
     /* действия */
     var as = U.el('div', { class: 'insp-section' });
     var acts2 = U.el('div', { class: 'insp-actions' });
-    if (def.key === 'cpu8') {
+    if (def.key === 'cpu8' || def.key === 'cpu_bus') {
       acts2.appendChild(actionBtn('Перезапустить', function () {
         if (def.init) def.init(c);
         toast('Процессор перезапущен');
@@ -1197,6 +1198,19 @@
         { k: 'B', v: EC.cpu.hex(mach.b), cls: 'amber' },
         { k: 'PC', v: EC.cpu.hex(mach.pc), cls: 'blue' }
       ] : [{ k: '—', v: '—' }];
+    } else if (def.key === 'cpu_bus') {
+      var mb = c.state && c.state.m;
+      rows = mb ? [
+        { k: 'A', v: EC.cpu.hex(mb.a) },
+        { k: 'адрес', v: EC.cpu.hex(mb.addr), cls: 'amber' },
+        { k: 'PC', v: EC.cpu.hex(mb.pc), cls: 'blue' }
+      ] : [{ k: '—', v: '—' }];
+    } else if (def.key === 'memory') {
+      rows = [
+        { k: 'адрес', v: EC.cpu.hex(c.addr || 0) },
+        { k: 'байт', v: EC.cpu.hex(c.byte || 0), cls: 'amber' },
+        { k: 'U', v: U.fmtSI(c.v || 0, 3) + 'В', cls: 'blue' }
+      ];
     } else if (def.key === 'opamp') {
       rows = [
         { k: 'Uвх', v: U.fmtSI(c.vin || 0, 3) + 'В' },
@@ -1230,6 +1244,19 @@
       var flags = (mm.z ? 'Z' : '·') + (mm.c ? 'C' : '·');
       var where = c.inReset ? 'сброс' : (mm.halted ? 'остановлен' : EC.cpu.disassemble(mm.mem, mm.pc).text);
       extra.textContent = 'Флаги ' + flags + ' · такт ' + mm.cycles + ' · ' + where;
+    } else if (def.key === 'cpu_bus') {
+      var mx = c.state && c.state.m;
+      if (!mx) { extra.textContent = ''; return; }
+      var fl = (mx.z ? 'Z' : '·') + (mx.c ? 'C' : '·');
+      var what = c.inReset ? 'сброс'
+        : (mx.halted ? 'остановлен'
+          : (mx.fetch ? 'выборка кода' : (mx.rd ? 'запись в память' : 'чтение памяти')));
+      extra.textContent = 'Флаги ' + fl + ' · такт ' + mx.cycles + ' · ' + what;
+    } else if (def.key === 'memory') {
+      extra.textContent = c.powered
+        ? 'Обмен: ' + (c.mode || '—') + ' · ячеек ' + EC.MEM_BYTES +
+          ' · ' + (c.selected ? 'микросхема выбрана' : 'не выбрана')
+        : 'Питания нет';
     } else {
       extra.textContent = 'Режим: ' + (c.mode || '—');
     }
@@ -1444,6 +1471,10 @@
       var c = circuit.components[i];
       if (c.type === 'vsource' && c.props.wave !== 'dc' && c.props.freq > 0) {
         dt = Math.min(dt, 1 / (c.props.freq * 400));
+      }
+      if (c.type === 'cpu_bus' && c.props.clkSrc === 'internal') {
+        // за один шаг расчёта процессор делает не больше одного обмена
+        dt = Math.min(dt, 1 / (Math.max(c.props.freq, 1) * 4));
       }
       if (c.type === 'inductor') Ls.push(Math.max(c.props.L, 1e-12));
       if (c.type === 'capacitor' || c.type === 'capacitor_pol') Cs.push(Math.max(c.props.C, 1e-15));

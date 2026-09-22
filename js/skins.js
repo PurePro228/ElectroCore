@@ -1251,4 +1251,70 @@
     }
     label(g, c, [c.name || '555'], GRID * 4.2);
   };
+
+  /**
+   * Широкий корпус DIP шириной 0.6 дюйма: два ряда лужёных ножек,
+   * ключ на торце, точка первого вывода и шелкография на крышке.
+   */
+  function wideDip(g, c, faceFn, labels, live) {
+    var def = c.def();
+    var half = Math.abs(def.pins[0].x);          // половина шага между рядами
+    var w = (half * 2 - 1.7) * GRID;
+    var top = def.pins[0].y, bottom = def.pins[0].y;
+    def.pins.forEach(function (p) {
+      top = Math.min(top, p.y); bottom = Math.max(bottom, p.y);
+    });
+    var h = (bottom - top + 2) * GRID;
+    var cy = (top + bottom) / 2 * GRID;
+
+    def.pins.forEach(function (p) {
+      lead(g, p.x * GRID, p.y * GRID, (p.x > 0 ? 1 : -1) * w / 2, p.y * GRID, 2.6);
+    });
+    shadowUnder(g, w, h);
+
+    // чёрный пластик с заливкой по высоте корпуса
+    g.fillStyle = grad(g, 'dipWide' + Math.round(h), 0, cy - h / 2, 0, cy + h / 2, [
+      [0, '#434a54'], [0.06, '#2a2f37'], [0.5, '#1c2026'], [0.94, '#14171c'], [1, '#0b0d10']
+    ]);
+    roundRect(g, -w / 2, cy - h / 2, w, h, 2.5); g.fill();
+    // продольный блик по гребню крышки
+    g.fillStyle = 'rgba(255,255,255,.055)';
+    roundRect(g, -w / 2 + 2, cy - h / 2 + 2, w - 4, h * 0.035, 1.5); g.fill();
+    // ключ на торце и точка первого вывода
+    g.fillStyle = 'rgba(6,8,11,.92)';
+    g.beginPath(); g.arc(0, cy - h / 2, w * 0.075, 0, Math.PI); g.fill();
+    g.fillStyle = 'rgba(190,200,212,.5)';
+    g.beginPath(); g.arc(-w * 0.38, cy - h / 2 + 8, 2, 0, 7); g.fill();
+
+    gfx.chipPins(g, c, labels, w, 5.4);
+
+    g.save();
+    g.rotate(-(c.rot || 0) * Math.PI / 2);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    faceFn().forEach(function (ln) {
+      if (!ln.t) return;
+      g.font = '700 ' + ln.size + 'px ui-monospace, Menlo, monospace';
+      g.fillStyle = ln.color;
+      g.fillText(ln.t, 0, cy + ln.y);
+    });
+    g.restore();
+
+    if (live) {
+      g.strokeStyle = 'rgba(125,255,208,.45)'; g.lineWidth = 1.2;
+      roundRect(g, -w / 2, cy - h / 2, w, h, 2.5); g.stroke();
+    }
+    label(g, c, [c.name || ''], cy + h / 2 + GRID * 0.9);
+  }
+
+  real.cpu_bus = function (g, c) {
+    var m = c.state && c.state.m;
+    wideDip(g, c, function () { return EC.cpuBusFace(c); }, EC.CPUB_PINS,
+      c.powered && m && !m.halted && !c.inReset);
+  };
+
+  real.memory = function (g, c) {
+    wideDip(g, c, function () { return EC.memFace(c); }, EC.MEM_PINS,
+      c.powered && c.selected);
+  };
 })(window);

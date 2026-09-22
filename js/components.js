@@ -2259,8 +2259,8 @@
   }
 
   define({
-    key: 'cpu8', name: 'Процессор EC-8', cat: 'logic',
-    tip: 'Восьмибитный процессор с памятью на 256 байт и четырьмя линиями ввода-вывода. Программа пишется на ассемблере в свойствах.',
+    key: 'cpu8', name: 'Микроконтроллер EC-8', cat: 'logic',
+    tip: 'Однокристальная машина: процессор, память на 256 байт и четыре линии ввода-вывода в одном корпусе — как у ATtiny. Внешняя память не нужна.',
     pins: [
       { x: -3, y: -3, name: '1 Vcc' },
       { x: -3, y: -1, name: '2 CLK' },
@@ -2421,4 +2421,376 @@
     }
     g.restore();
   };
+})(window);
+
+/* ElectroCore — процессор с внешней шиной и микросхема памяти. */
+(function (global) {
+  'use strict';
+  var EC = global.EC, U = EC.util;
+  var GRID = EC.GRID, define = EC.define;
+  var gfx = EC.gfx, roundRect = gfx.roundRect, lead = gfx.lead, label = gfx.label;
+
+  /* ------------------------------------------------------------------ */
+  /*  Общие приёмы работы с шиной                                        */
+  /* ------------------------------------------------------------------ */
+
+  var DRIVE = 50;                              // сопротивление выходного каскада
+  var PULL = 1e6;                              // подтяжка неподключённого входа
+
+  /** Выставляет на вывод логический уровень через выходное сопротивление. */
+  function driveBit(ctx, pin, high, VCC, GND, r) {
+    ctx.mna.conductance(pin, high ? VCC : GND, 1 / r);
+    ctx.mna.conductance(pin, high ? GND : VCC, 1e-11);
+  }
+
+  /** Читает логический уровень вывода относительно общего провода. */
+  function readBit(ctx, pin, vg, vcc) {
+    return (ctx.nv(pin) - vg) > vcc * 0.5;
+  }
+
+  /** Собирает число из группы выводов, младший бит первым. */
+  function readBus(ctx, nodes, first, count, vg, vcc) {
+    var v = 0;
+    for (var i = 0; i < count; i++) if (readBit(ctx, nodes[first + i], vg, vcc)) v |= (1 << i);
+    return v;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  Процессор EC-8B в корпусе DIP-28                                   */
+  /* ------------------------------------------------------------------ */
+
+  /* Нумерация ножек настоящая: слева сверху вниз 1…14, справа снизу
+     вверх 15…28. Индекс вывода в списке равен номеру ножки минус один. */
+  var CPUB = {
+    VCC: 0, GND: 1, CLK: 2, RST: 3, HLT: 4, SYNC: 5,
+    A: 6,            // A0…A7 — ножки 7…14
+    P: 14,           // P0…P3 — ножки 15…18
+    RD: 18, WR: 19,  // ножки 19 и 20
+    D: 20            // D0…D7 — ножки 21…28
+  };
+
+  /* Слева питание, тактирование и вся шина адреса; справа порт, сигналы
+     обмена и шина данных — так же, как у настоящих микросхем памяти. */
+  var CPUB_LEFT = ['Vcc', 'GND', 'CLK', 'СБР', '/СТОП', '/КОД',
+    'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+  var CPUB_RIGHT = ['P0', 'P1', 'P2', 'P3', '/ЧТ', '/ЗП',
+    'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'];
+
+  /** Подписи на корпусе: индекс вывода, сокращение, номер ножки. */
+  var CPUB_PINS = [];
+  CPUB_LEFT.forEach(function (t, i) { CPUB_PINS.push({ i: i, t: t, n: i + 1 }); });
+  CPUB_RIGHT.forEach(function (t, i) { CPUB_PINS.push({ i: 14 + i, t: t, n: 15 + i }); });
+  EC.CPUB_PINS = CPUB_PINS;
+
+  /** Геометрия корпуса DIP-28 шириной 0.6 дюйма. */
+  function cpuBusPins() {
+    var pins = [], i;
+    for (i = 0; i < 14; i++) {
+      pins.push({ x: -6, y: -13 + i * 2, name: (i + 1) + ' ' + CPUB_LEFT[i] });
+    }
+    for (i = 0; i < 14; i++) {
+      pins.push({ x: 6, y: 13 - i * 2, name: (15 + i) + ' ' + CPUB_RIGHT[i] });
+    }
+    return pins;
+  }
+
+  define({
+    key: 'cpu_bus', name: 'Процессор EC-8B', cat: 'logic',
+    tip: 'Настоящий процессор: своей памяти у него нет. Код и данные он читает по внешней шине адреса и данных, поэтому рядом обязательно нужна микросхема памяти.',
+    pins: cpuBusPins(),
+    props: [
+      { key: 'freq', label: 'Тактовая частота', unit: 'Гц', def: 500, min: 1, max: 20000 },
+      { key: 'clkSrc', label: 'Тактирование', type: 'select', def: 'internal',
+        options: [{ v: 'internal', t: 'встроенный' }, { v: 'external', t: 'с вывода CLK' }] },
+      { key: 'Rout', label: 'Сопр. выходов', unit: 'Ω', def: 50, min: 1 }
+    ],
+    init: function (c) { c.state = { m: EC.cpu.createBus(), clkHigh: false, acc: 0 }; },
+    stamp: function (c, ctx) {
+      var m = ctx.mna, st = c.state, mach = st.m, n = c.n, i;
+      var VCC = n[CPUB.VCC], GND = n[CPUB.GND];
+      var r = Math.max(c.props.Rout, 1);
+      m.conductance(VCC, GND, 1 / 5000);       // потребление ядра
+      m.conductance(n[CPUB.RST], VCC, 1 / 100000);
+      m.conductance(n[CPUB.CLK], GND, 1 / PULL);
+      if (!c.powered) {
+        for (i = 0; i < 8; i++) m.conductance(n[CPUB.D + i], GND, 1 / PULL);
+        return;
+      }
+      // адрес и управление процессор держит в течение всего такта
+      for (i = 0; i < 8; i++) {
+        driveBit(ctx, n[CPUB.A + i], (mach.addr >> i) & 1, VCC, GND, r);
+      }
+      driveBit(ctx, n[CPUB.RD], mach.rd, VCC, GND, r);
+      driveBit(ctx, n[CPUB.WR], mach.wr, VCC, GND, r);
+      driveBit(ctx, n[CPUB.SYNC], !mach.fetch, VCC, GND, r);
+      driveBit(ctx, n[CPUB.HLT], !mach.halted, VCC, GND, r);
+      // шина данных: процессор держит её только на записи
+      for (i = 0; i < 8; i++) {
+        var d = n[CPUB.D + i];
+        if (mach.driveData) driveBit(ctx, d, (mach.dataOut >> i) & 1, VCC, GND, r);
+        else m.conductance(d, GND, 1 / PULL);
+      }
+      for (i = 0; i < 4; i++) {
+        var p = n[CPUB.P + i];
+        if ((mach.ddr >> i) & 1) driveBit(ctx, p, (mach.port >> i) & 1, VCC, GND, r);
+        else m.conductance(p, GND, 1 / PULL);
+      }
+    },
+    post: function (c, ctx) {
+      var st = c.state, mach = st.m, n = c.n;
+      var vg = ctx.nv(n[CPUB.GND]);
+      var vcc = ctx.nv(n[CPUB.VCC]) - vg;
+      c.vcc = vcc;
+      c.powered = vcc > 2;
+      if (!c.powered) {
+        EC.cpu.resetBus(mach);
+        c.inReset = false;
+        c.pinI = null;
+        c.v = 0; c.i = 0;
+        return;
+      }
+      c.inReset = (ctx.nv(n[CPUB.RST]) - vg) < vcc * 0.3;
+      if (c.inReset) EC.cpu.resetBus(mach);
+
+      mach.pins = readBus(ctx, n, CPUB.P, 4, vg, vcc);
+      var data = mach.driveData ? mach.dataOut : readBus(ctx, n, CPUB.D, 8, vg, vcc);
+
+      if (!c.inReset) {
+        if (c.props.clkSrc === 'external') {
+          var high = readBit(ctx, n[CPUB.CLK], vg, vcc);
+          if (high && !st.clkHigh) EC.cpu.busTick(mach, data);
+          st.clkHigh = high;
+        } else {
+          st.acc += Math.max(c.props.freq, 1) * ctx.dt;
+          var steps = Math.floor(st.acc);
+          if (steps > 200) steps = 200;
+          st.acc -= steps;
+          // за один шаг расчёта возможен лишь один обмен: данные на шине
+          // успевают установиться только к следующему шагу
+          if (steps > 0) EC.cpu.busTick(mach, data);
+        }
+      }
+      c.v = vcc;
+      c.i = vcc / 5000;
+      c.level = mach.halted ? 'стоп' : (mach.rd ? 'зап' : 'чт');
+      c.pinI = null;                           // ток шины считается по проводам
+    },
+    draw: function (g, c) {
+      drawBigChip(g, c, 6, 'EC-8B', CPUB_PINS, function () {
+        return cpuBusFace(c);
+      });
+    }
+  });
+
+  /** Строки на лицевой части процессора. */
+  function cpuBusFace(c) {
+    var st = c.state, m = st && st.m;
+    if (!m) return [];
+    return [
+      { t: 'EC-8B', y: -GRID * 2.6, size: 10, color: 'rgba(232,240,248,.85)' },
+      { t: c.inReset ? 'СБРОС' : (m.halted ? 'СТОП' : 'A ' + EC.cpu.hex(m.addr)),
+        y: -GRID * 0.8, size: 7,
+        color: c.inReset ? 'rgba(255,170,120,.9)' : 'rgba(125,255,208,.8)' },
+      { t: 'PC ' + EC.cpu.hex(m.pc), y: GRID * 0.6, size: 7, color: 'rgba(180,200,220,.7)' },
+      { t: m.halted ? '' : (m.rd ? 'ЗАПИСЬ' : 'ЧТЕНИЕ'), y: GRID * 2, size: 6.5,
+        color: 'rgba(160,185,210,.65)' }
+    ];
+  }
+  EC.cpuBusFace = cpuBusFace;
+
+  /* ------------------------------------------------------------------ */
+  /*  Микросхема памяти 2К × 8 в корпусе DIP-24                          */
+  /* ------------------------------------------------------------------ */
+
+  /* Расположение выводов повторяет статическое ОЗУ вроде 6116: одиннадцать
+     адресных входов, восемь линий данных и три сигнала управления. */
+  var MEM = { VCC: 0, GND: 1, CS: 2, CE2: 3, A: 4, OE: 14, WE: 15, D: 16 };
+  var MEM_BITS = 10;
+  var MEM_BYTES = 1 << MEM_BITS;               // 1024 байта
+
+  var MEM_LEFT = ['Vcc', 'GND', '/ВЫБ', 'ВЫБ2',
+    'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+  var MEM_RIGHT = ['A8', 'A9', '/ЧТ', '/ЗП',
+    'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'];
+
+  var MEM_PINS = [];
+  MEM_LEFT.forEach(function (t, i) { MEM_PINS.push({ i: i, t: t, n: i + 1 }); });
+  MEM_RIGHT.forEach(function (t, i) { MEM_PINS.push({ i: 12 + i, t: t, n: 13 + i }); });
+  EC.MEM_PINS = MEM_PINS;
+
+  function memPins() {
+    var pins = [], i;
+    for (i = 0; i < 12; i++) {
+      pins.push({ x: -6, y: -11 + i * 2, name: (i + 1) + ' ' + MEM_LEFT[i] });
+    }
+    for (i = 0; i < 12; i++) {
+      pins.push({ x: 6, y: 11 - i * 2, name: (13 + i) + ' ' + MEM_RIGHT[i] });
+    }
+    return pins;
+  }
+
+  var MEM_DEFAULT = [
+    '; Содержимое памяти для процессора EC-8B.',
+    '; Мигает светодиодом на линии P0.',
+    '',
+    '        LDI 0b1111      ; все четыре линии порта',
+    '        DIR             ; настроить как выходы',
+    '',
+    'цикл:   LDI 1           ; P0 = 1',
+    '        OUT',
+    '        CALL пауза',
+    '        LDI 0           ; P0 = 0',
+    '        OUT',
+    '        CALL пауза',
+    '        JMP цикл',
+    '',
+    'пауза:  LDI 40          ; счётчик лежит в ячейке 0x80',
+    '        ST 0x80',
+    'вн:     LD 0x80',
+    '        DEC',
+    '        ST 0x80',
+    '        JNZ вн',
+    '        RET'
+  ].join('\n');
+
+  /** Пересобирает содержимое памяти, если текст изменился. */
+  function syncMemory(c) {
+    if (c._text === c.props.content && c.state.asm) return;
+    c._text = c.props.content;
+    var res = EC.cpu.assemble(c.props.content);
+    c.state.asm = res;
+    c.state.bytes = new Uint8Array(MEM_BYTES);
+    if (res.ok) c.state.bytes.set(res.code, 0);
+    c.asmError = res.ok ? null : res.errors[0];
+  }
+
+  define({
+    key: 'memory', name: 'Память 1К×8', cat: 'logic',
+    tip: 'Статическое ОЗУ на 1024 байта: слева шина адреса и выбор микросхемы, справа сигналы обмена и шина данных. Работает, когда /ВЫБ прижат к общему проводу, а ВЫБ2 — к питанию. Процессор EC-8B адресует только первые 256 байт, поэтому входы A8 и A9 сажают на общий провод.',
+    pins: memPins(),
+    props: [
+      { key: 'content', label: 'Содержимое', type: 'code', def: MEM_DEFAULT },
+      { key: 'readOnly', label: 'Только чтение (ПЗУ)', type: 'bool', def: false },
+      { key: 'Rout', label: 'Сопр. выходов', unit: 'Ω', def: 50, min: 1 }
+    ],
+    init: function (c) {
+      c.state = { asm: null, bytes: null, out: 0, driving: false };
+      c._text = null;
+      syncMemory(c);
+    },
+    stamp: function (c, ctx) {
+      var m = ctx.mna, n = c.n, st = c.state, i;
+      var VCC = n[MEM.VCC], GND = n[MEM.GND];
+      m.conductance(VCC, GND, 1 / 20000);      // потребление микросхемы
+      // управляющие входы подтянуты к питанию: неподключённый вывод пассивен
+      m.conductance(n[MEM.CS], VCC, 1 / PULL);
+      m.conductance(n[MEM.OE], VCC, 1 / PULL);
+      m.conductance(n[MEM.WE], VCC, 1 / PULL);
+      m.conductance(n[MEM.CE2], VCC, 1 / PULL);
+      for (i = 0; i < MEM_BITS; i++) m.conductance(n[MEM.A + i], GND, 1 / PULL);
+      var r = Math.max(c.props.Rout, 1);
+      for (i = 0; i < 8; i++) {
+        var d = n[MEM.D + i];
+        if (c.powered && st.driving) driveBit(ctx, d, (st.out >> i) & 1, VCC, GND, r);
+        else m.conductance(d, GND, 1 / PULL);
+      }
+    },
+    post: function (c, ctx) {
+      syncMemory(c);
+      var n = c.n, st = c.state, i;
+      var vg = ctx.nv(n[MEM.GND]);
+      var vcc = ctx.nv(n[MEM.VCC]) - vg;
+      c.vcc = vcc;
+      c.powered = vcc > 2;
+      if (!c.powered) { st.driving = false; c.pinI = null; c.v = 0; c.i = 0; return; }
+
+      var addr = 0;
+      for (i = 0; i < MEM_BITS; i++) {
+        if (readBit(ctx, n[MEM.A + i], vg, vcc)) addr |= (1 << i);
+      }
+      var cs = readBit(ctx, n[MEM.CS], vg, vcc) || !readBit(ctx, n[MEM.CE2], vg, vcc);
+      var oe = readBit(ctx, n[MEM.OE], vg, vcc);
+      var we = readBit(ctx, n[MEM.WE], vg, vcc);
+      c.addr = addr;
+      c.selected = !cs;
+
+      if (!cs && !we && !c.props.readOnly) {    // запись идёт уровнем
+        st.bytes[addr] = readBus(ctx, n, MEM.D, 8, vg, vcc);
+        c.mode = 'запись';
+      } else if (!cs && !oe) {
+        c.mode = 'чтение';
+      } else {
+        c.mode = '—';
+      }
+      st.driving = !cs && !oe && we;
+      st.out = st.bytes[addr];
+      c.v = vcc;
+      c.i = vcc / 20000;
+      c.byte = st.out;
+      c.warn = (st.asm && !st.asm.ok)
+        ? 'Ошибка в содержимом, строка ' + st.asm.errors[0].line + ': ' + st.asm.errors[0].msg
+        : null;
+      c.pinI = null;
+    },
+    draw: function (g, c) {
+      drawBigChip(g, c, 6, 'ОЗУ', MEM_PINS, function () { return memFace(c); });
+    }
+  });
+
+  /** Строки на лицевой части микросхемы памяти. */
+  function memFace(c) {
+    return [
+      { t: c.props.readOnly ? 'ПЗУ 1К×8' : 'ОЗУ 1К×8', y: -GRID * 1.8, size: 9,
+        color: 'rgba(232,240,248,.85)' },
+      { t: c.powered ? 'A ' + EC.cpu.hex(c.addr || 0) : '—', y: -GRID * 0.2, size: 7,
+        color: c.selected ? 'rgba(125,255,208,.8)' : 'rgba(150,170,190,.6)' },
+      { t: c.powered ? 'D ' + EC.cpu.hex(c.byte || 0) + '  ' + (c.mode || '') : '',
+        y: GRID * 1.2, size: 7, color: 'rgba(180,200,220,.7)' }
+    ];
+  }
+  EC.memFace = memFace;
+  EC.MEM_BYTES = MEM_BYTES;
+
+  /* ------------------------------------------------------------------ */
+  /*  Отрисовка крупной микросхемы                                       */
+  /* ------------------------------------------------------------------ */
+
+  /** Корпус с двумя рядами выводов, подписями и строками на лицевой части. */
+  function drawBigChip(g, c, half, title, labels, linesFn) {
+    var def = c.def();
+    var w = (half * 2 - 1.4) * GRID;
+    var top = -1e9, bottom = 1e9;
+    def.pins.forEach(function (p) {
+      top = Math.max(top, p.y); bottom = Math.min(bottom, p.y);
+    });
+    var h = (top - bottom + 2) * GRID;
+    var cy = (top + bottom) / 2 * GRID;
+    def.pins.forEach(function (p) {
+      lead(g, p.x * GRID, p.y * GRID, (p.x > 0 ? 1 : -1) * w / 2, p.y * GRID);
+    });
+    g.fillStyle = 'rgba(34,40,50,.96)';
+    roundRect(g, -w / 2, cy - h / 2, w, h, 3); g.fill();
+    g.strokeStyle = c.powered ? 'rgba(125,255,208,.7)' : 'rgba(170,190,210,.6)';
+    g.lineWidth = 1.3;
+    roundRect(g, -w / 2, cy - h / 2, w, h, 3); g.stroke();
+    // ключ и точка первого вывода
+    g.fillStyle = 'rgba(8,10,13,.9)';
+    g.beginPath(); g.arc(0, cy - h / 2, w * 0.07, 0, Math.PI); g.fill();
+    g.fillStyle = 'rgba(190,200,212,.55)';
+    g.beginPath(); g.arc(-w * 0.38, cy - h / 2 + 7, 1.9, 0, 7); g.fill();
+    gfx.chipPins(g, c, labels, w, 5.4);
+    g.save();
+    g.rotate(-(c.rot || 0) * Math.PI / 2);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    linesFn().forEach(function (ln) {
+      if (!ln.t) return;
+      g.font = '700 ' + ln.size + 'px ui-monospace, Menlo, monospace';
+      g.fillStyle = ln.color;
+      g.fillText(ln.t, 0, cy + ln.y);
+    });
+    g.restore();
+    label(g, c, [c.name || title], cy + h / 2 + GRID * 0.9);
+  }
+  EC.drawBigChip = drawBigChip;
 })(window);

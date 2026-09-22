@@ -250,8 +250,162 @@
     m.cycles++;
   }
 
+  /* ------------------------------------------------------------------ */
+  /*  Процессор с внешней шиной                                          */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * У этой машины памяти внутри нет. Каждый байт она читает и пишет
+   * через шину: выставляет адрес, опускает /RD или /WR и ждёт такта.
+   * Команда занимает столько тактов, сколько обращений ей нужно:
+   *   без операнда            — 1 такт  (выборка кода)
+   *   с операндом             — 2 такта (код, операнд)
+   *   LD и ST                 — 3 такта (код, операнд, обмен с памятью)
+   * Возвраты из подпрограмм хранит аппаратный стек на восемь уровней,
+   * как у однокристальных машин, поэтому CALL работает и без ОЗУ.
+   */
+
+  var PH_CODE = 0, PH_ARG = 1, PH_READ = 2, PH_WRITE = 3;
+  var STACK_DEPTH = 8;
+
+  function createBus() {
+    var m = {
+      a: 0, b: 0, pc: 0,
+      z: false, c: false,
+      halted: false,
+      phase: PH_CODE, op: 0, arg: 0,
+      stack: new Uint8Array(STACK_DEPTH), sp: 0,
+      port: 0, ddr: 0, pins: 0,
+      cycles: 0,
+      addr: 0, rd: true, wr: true,       // управление активно низким уровнем
+      dataOut: 0, driveData: false,
+      fetch: true                        // идёт выборка кода команды
+    };
+    busUpdate(m);
+    return m;
+  }
+
+  function resetBus(m) {
+    m.a = 0; m.b = 0; m.pc = 0;
+    m.z = false; m.c = false;
+    m.halted = false;
+    m.phase = PH_CODE; m.op = 0; m.arg = 0;
+    m.sp = 0;
+    m.port = 0; m.ddr = 0;
+    m.cycles = 0;
+    busUpdate(m);
+  }
+
+  /** Что процессор держит на шине в течение текущего такта. */
+  function busUpdate(m) {
+    m.fetch = !m.halted && m.phase === PH_CODE;
+    if (m.halted) {
+      m.rd = true; m.wr = true; m.driveData = false;
+      return;
+    }
+    m.driveData = false;
+    m.wr = true;
+    m.rd = false;
+    if (m.phase === PH_CODE || m.phase === PH_ARG) m.addr = m.pc;
+    else if (m.phase === PH_READ) m.addr = m.arg;
+    else {                                  // запись
+      m.addr = m.arg;
+      m.rd = true; m.wr = false;
+      m.driveData = true; m.dataOut = m.a;
+    }
+  }
+
+  /** Один такт: процессор забирает то, что на шине, и делает следующий шаг. */
+  function busTick(m, dataIn) {
+    if (m.halted) return;
+    var def;
+    switch (m.phase) {
+      case PH_CODE:
+        m.op = dataIn & 0xFF;
+        m.pc = (m.pc + 1) & 0xFF;
+        def = BY_OP[m.op];
+        if (def && def.arg) m.phase = PH_ARG;
+        else { execBus(m, m.op, 0); m.phase = PH_CODE; }
+        break;
+      case PH_ARG:
+        m.arg = dataIn & 0xFF;
+        m.pc = (m.pc + 1) & 0xFF;
+        if (m.op === 0x02) m.phase = PH_READ;        // LD
+        else if (m.op === 0x03) m.phase = PH_WRITE;  // ST
+        else { execBus(m, m.op, m.arg); m.phase = PH_CODE; }
+        break;
+      case PH_READ:
+        m.a = dataIn & 0xFF;
+        m.z = m.a === 0;
+        m.phase = PH_CODE;
+        break;
+      case PH_WRITE:
+        m.phase = PH_CODE;
+        break;
+    }
+    m.cycles++;
+    busUpdate(m);
+  }
+
+  /** Команды, не требующие обращения к памяти. */
+  function execBus(m, op, arg) {
+    var r;
+    switch (op) {
+      case 0x00: break;
+      case 0x01: m.a = arg; setZ(m, m.a); break;
+      case 0x04: m.b = m.a; break;
+      case 0x05: m.a = m.b; setZ(m, m.a); break;
+      case 0x06: r = m.a + m.b; m.c = r > 0xFF; m.a = setZ(m, r); break;
+      case 0x07: r = m.a - m.b; m.c = r < 0; m.a = setZ(m, r); break;
+      case 0x08: m.a = setZ(m, m.a & m.b); m.c = false; break;
+      case 0x09: m.a = setZ(m, m.a | m.b); m.c = false; break;
+      case 0x0A: m.a = setZ(m, m.a ^ m.b); m.c = false; break;
+      case 0x0B: r = m.a + 1; m.c = r > 0xFF; m.a = setZ(m, r); break;
+      case 0x0C: r = m.a - 1; m.c = r < 0; m.a = setZ(m, r); break;
+      case 0x0D: m.c = (m.a & 0x80) !== 0; m.a = setZ(m, m.a << 1); break;
+      case 0x0E: m.c = (m.a & 0x01) !== 0; m.a = setZ(m, m.a >> 1); break;
+      case 0x0F: m.a = setZ(m, ~m.a); break;
+      case 0x10: r = m.a + arg; m.c = r > 0xFF; m.a = setZ(m, r); break;
+      case 0x11: r = m.a - arg; m.c = r < 0; m.a = setZ(m, r); break;
+      case 0x12: m.a = setZ(m, m.a & arg); m.c = false; break;
+      case 0x13: m.a = setZ(m, m.a | arg); m.c = false; break;
+      case 0x14: r = m.a - arg; m.c = r < 0; setZ(m, r); break;
+      case 0x20: m.pc = arg; break;
+      case 0x21: if (m.z) m.pc = arg; break;
+      case 0x22: if (!m.z) m.pc = arg; break;
+      case 0x23: if (m.c) m.pc = arg; break;
+      case 0x24: if (!m.c) m.pc = arg; break;
+      case 0x25:
+        if (m.sp < STACK_DEPTH) m.stack[m.sp++] = m.pc;   // переполнение стека теряет адрес
+        m.pc = arg;
+        break;
+      case 0x26:
+        if (m.sp > 0) m.pc = m.stack[--m.sp];
+        break;
+      case 0x30: m.port = m.a & PORT_MASK; break;
+      case 0x31: m.a = m.pins & PORT_MASK; setZ(m, m.a); break;
+      case 0x32: m.ddr = m.a & PORT_MASK; break;
+      case 0xFF: m.halted = true; break;
+      default: break;
+    }
+  }
+
+  /** Сколько тактов занимает команда с этим кодом. */
+  function cyclesOf(op) {
+    var def = BY_OP[op];
+    if (!def) return 1;
+    if (op === 0x02 || op === 0x03) return 3;
+    return def.arg ? 2 : 1;
+  }
+
   EC.cpu = {
     ISA: ISA,
+    STACK_DEPTH: STACK_DEPTH,
+    createBus: createBus,
+    resetBus: resetBus,
+    busTick: busTick,
+    busUpdate: busUpdate,
+    cyclesOf: cyclesOf,
     MEM_SIZE: MEM_SIZE,
     PORT_BITS: PORT_BITS,
     PORT_MASK: PORT_MASK,

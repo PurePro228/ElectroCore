@@ -982,7 +982,7 @@ test('Обмен схемами: выгрузка и загрузка', function
       console.log('      не сошлось:', ex.id, back.errors.join('; '));
     }
   });
-  check('все 13 примеров переживают обход', bad, 0, 0);
+  check('все ' + EC.examples.length + ' примеров переживают обход', bad, 0, 0);
 
   // расчёт после обхода совпадает
   const orig = EC.examples.find(e => e.id === 'led').make();
@@ -1135,6 +1135,199 @@ test('Схема с процессором проходит через обме�
   const led = r.circuit.components.find(c => c.type === 'led');
   check('процессор зажёг светодиод', led.i > 0.005 ? 1 : 0, 1, 0);
   check('счётчик команд идёт', cpu.state.m.cycles > 100 ? 1 : 0, 1, 0);
+});
+
+/* ------------------------------------------------------------------ */
+/*  Процессор с внешней шиной и микросхема памяти                      */
+/* ------------------------------------------------------------------ */
+
+/** Напряжение на выводе относительно общего провода. */
+function pinV(ct, c, i) {
+  const n = c.n[i];
+  return n === undefined || n < 0 ? 0 : ct.x[n];
+}
+
+/** Собирает систему «процессор + память» и возвращает её части. */
+function busSystem(code, opts) {
+  opts = opts || {};
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -30, -12); bat.props.V = 5; bat.props.Rint = 0.1;
+  const gnd = ct.add('ground', -30, 16);
+  const cpu = ct.add('cpu_bus', 0, 0);
+  cpu.props.freq = opts.freq || 2000;
+  if (opts.clkSrc) cpu.props.clkSrc = opts.clkSrc;
+  const mem = ct.add('memory', -2, -34);
+  mem.props.content = code;
+  if (opts.readOnly) mem.props.readOnly = true;
+  ct.connect(bat.id, 0, cpu.id, 0);            // питание
+  ct.connect(cpu.id, 0, mem.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  ct.connect(cpu.id, 1, gnd.id, 0);
+  ct.connect(mem.id, 1, gnd.id, 0);
+  ct.connect(mem.id, 2, gnd.id, 0);            // /ВЫБ на общий провод
+  ct.connect(mem.id, 3, mem.id, 0);            // ВЫБ2 на питание
+  ct.connect(mem.id, 12, gnd.id, 0);           // A8 и A9 не задействованы
+  ct.connect(mem.id, 13, gnd.id, 0);
+  ct.connect(cpu.id, 18, mem.id, 14);          // /ЧТ
+  ct.connect(cpu.id, 19, mem.id, 15);          // /ЗП
+  for (let i = 0; i < 8; i++) {
+    ct.connect(cpu.id, 6 + i, mem.id, 4 + i);  // шина адреса
+    ct.connect(cpu.id, 20 + i, mem.id, 16 + i);// шина данных
+  }
+  const r = ct.add('resistor', 18, 25); r.props.R = 330;
+  const led = ct.add('led', 30, 25);
+  const led2gnd = ct.add('ground', 42, 30);
+  ct.connect(cpu.id, 14, r.id, 0);             // P0 → резистор → светодиод
+  ct.connect(r.id, 1, led.id, 0);
+  ct.connect(led.id, 1, led2gnd.id, 0);
+  ct.reset();
+  return { ct: ct, cpu: cpu, mem: mem, led: led, gnd: gnd, bat: bat };
+}
+
+test('Процессор EC-8B выполняет программу из микросхемы памяти', function () {
+  const code = [
+    '        LDI 0b1111',
+    '        DIR',
+    'цикл:   LDI 1',
+    '        OUT',
+    '        CALL пауза',
+    '        LDI 0',
+    '        OUT',
+    '        CALL пауза',
+    '        JMP цикл',
+    'пауза:  LDI 30',
+    '        ST 0x80',
+    'ждём:   LD 0x80',
+    '        DEC',
+    '        ST 0x80',
+    '        JNZ ждём',
+    '        RET'
+  ].join('\n');
+  const s = busSystem(code, { freq: 2000 });
+  check('содержимое памяти собрано', s.mem.state.asm.ok ? 1 : 0, 1, 0);
+  run(s.ct, 0.01, 1 / 8000);
+  check('память видит питание', s.mem.vcc, 5, 0.05);
+
+  let flips = 0, prev = null, peak = 0, reads = 0, writes = 0;
+  for (let i = 0; i < 40000; i++) {
+    s.ct.step(1 / 8000);
+    if (s.mem.mode === 'чтение') reads++;
+    if (s.mem.mode === 'запись') writes++;
+    const on = s.led.i > 0.003;
+    if (prev !== null && on !== prev) flips++;
+    prev = on;
+    peak = Math.max(peak, s.led.i);
+  }
+  check('процессор отсчитал такты', s.cpu.state.m.cycles > 9000 ? 1 : 0, 1, 0);
+  check('память отдавала байты', reads > 1000 ? 1 : 0, 1, 0);
+  check('процессор писал в память', writes > 100 ? 1 : 0, 1, 0);
+  check('счётчик задержки лежит в памяти', s.mem.state.bytes[0x80] <= 30 ? 1 : 0, 1, 0);
+  check('светодиод переключался', flips > 4 ? 1 : 0, 1, 0);
+  check('ток открытого выхода (5−Uд)/(Rвых+R)', peak, (5 - 1.9) / (50 + 330), 2e-3);
+});
+
+test('Адрес на шине совпадает с адресом, который выбрала память', function () {
+  const s = busSystem('счёт:   NOP\n        JMP счёт', { freq: 2000 });
+  let mismatch = 0, seen = {}, prev = -1;
+  for (let i = 0; i < 4000; i++) {
+    s.ct.step(1 / 8000);
+    if (!s.cpu.powered) continue;
+    // после смены адреса память видит новый уровень лишь на следующем шаге
+    if (s.mem.addr !== s.cpu.state.m.addr && s.mem.addr !== prev) mismatch++;
+    prev = s.cpu.state.m.addr;
+    seen[prev] = true;
+  }
+  check('память всегда выбирает адрес процессора', mismatch, 0, 0);
+  check('процессор ходил по разным адресам', Object.keys(seen).length >= 3 ? 1 : 0, 1, 0);
+});
+
+test('Невыбранная память не держит шину данных', function () {
+  const code = '        LDI 0b1111\n        DIR\n        LDI 1\n        OUT\n        HLT';
+  const s = busSystem(code, { freq: 2000 });
+  let drove = 0;
+  for (let i = 0; i < 400; i++) { s.ct.step(1 / 8000); if (s.mem.state.driving) drove++; }
+  check('выбранная память отдавала байты', drove > 0 ? 1 : 0, 1, 0);
+  check('программа выполнилась, светодиод горит', s.led.i > 0.005 ? 1 : 0, 1, 0);
+  check('после остановки шину никто не держит', s.mem.state.driving ? 1 : 0, 0, 0);
+
+  // снимаем выбор: вывод /ВЫБ уходит на питание
+  const w = s.ct.wires.find(x => (x.a.c === s.mem.id && x.a.p === 2) || (x.b.c === s.mem.id && x.b.p === 2));
+  s.ct.removeWire(w);
+  s.ct.connect(s.mem.id, 2, s.mem.id, 0);
+  s.cpu.def().init(s.cpu);                       // перезапуск процессора
+  let drove2 = 0;
+  for (let i = 0; i < 400; i++) { s.ct.step(1 / 8000); if (s.mem.state.driving) drove2++; }
+  check('снятая с выбора память шину не держит', drove2, 0, 0);
+  check('без памяти процессор читает нули', s.cpu.state.m.op, 0, 0);
+  check('светодиод погас', s.led.i < 1e-4 ? 1 : 0, 1, 0);
+});
+
+test('Сброс и внешнее тактирование шинного процессора', function () {
+  const s = busSystem('счёт:   INC\n        JMP счёт', { clkSrc: 'external' });
+  const clk = s.ct.add('vsource', -30, 30);
+  clk.props.wave = 'square'; clk.props.amp = 2.5; clk.props.offset = 2.5;
+  clk.props.freq = 500; clk.props.Rint = 50;
+  const rst = s.ct.add('vsource', -30, 40);
+  rst.props.wave = 'dc'; rst.props.amp = 0; rst.props.Rint = 100;
+  s.ct.connect(clk.id, 0, s.cpu.id, 2);
+  s.ct.connect(clk.id, 1, s.gnd.id, 0);
+  s.ct.connect(rst.id, 0, s.cpu.id, 3);
+  s.ct.connect(rst.id, 1, s.gnd.id, 0);
+  s.ct.reset();
+
+  run(s.ct, 0.2, 2e-4);
+  check('удержанный сброс останавливает процессор', s.cpu.state.m.cycles, 0, 0);
+  check('сброс распознан', s.cpu.inReset ? 1 : 0, 1, 0);
+
+  rst.props.amp = 5;
+  const before = s.cpu.state.m.cycles;
+  run(s.ct, 0.4, 2e-4);
+  const done = s.cpu.state.m.cycles - before;
+  check('за 0.4 с при 500 Гц прошло около 200 тактов', done, 200, 6);
+});
+
+test('Выводы состояния процессора: /КОД и /СТОП', function () {
+  const s = busSystem('        NOP\n        NOP\n        HLT', { freq: 2000 });
+  let fetchLow = 0, steps = 0;
+  for (let i = 0; i < 600; i++) {
+    s.ct.step(1 / 8000);
+    if (s.cpu.state.m.halted) break;
+    steps++;
+    if (pinV(s.ct, s.cpu, 5) < 2.5) fetchLow++;
+  }
+  check('на выборке кода /КОД прижат к нулю', fetchLow > 0 ? 1 : 0, 1, 0);
+  run(s.ct, 0.02, 1 / 8000);
+  check('процессор остановился', s.cpu.state.m.halted ? 1 : 0, 1, 0);
+  check('/СТОП ушёл в ноль', pinV(s.ct, s.cpu, 4) < 0.5 ? 1 : 0, 1, 0);
+  check('/КОД снят', pinV(s.ct, s.cpu, 5) > 4 ? 1 : 0, 1, 0);
+});
+
+test('Такты обмена по шине', function () {
+  const cy = EC.cpu.cyclesOf;
+  const op = m => EC.cpu.ISA.find(d => d.m === m).op;
+  check('NOP — один такт', cy(op('NOP')), 1, 0);
+  check('LDI — два такта', cy(op('LDI')), 2, 0);
+  check('LD — три такта', cy(op('LD')), 3, 0);
+  check('ST — три такта', cy(op('ST')), 3, 0);
+
+  // прогон машины с памятью на массиве: проверяем порядок обращений
+  const r = EC.cpu.assemble('        LDI 7\n        ST 0x40\n        LD 0x40\n        HLT');
+  check('программа собрана', r.ok ? 1 : 0, 1, 0);
+  const ram = new Uint8Array(256);
+  ram.set(r.code.subarray(0, 256));
+  const m = EC.cpu.createBus();
+  const trace = [];
+  for (let i = 0; i < 12 && !m.halted; i++) {
+    trace.push({ addr: m.addr, rd: m.rd, wr: m.wr });
+    if (!m.wr) ram[m.addr] = m.dataOut;         // запись уровнем, как в микросхеме
+    EC.cpu.busTick(m, ram[m.addr]);
+  }
+  check('в ячейку записана семёрка', ram[0x40], 7, 0);
+  check('аккумулятор прочитал её обратно', m.a, 7, 0);
+  const wr = trace.filter(t => !t.wr);
+  check('запись была одна', wr.length, 1, 0);
+  check('запись шла по адресу операнда', wr[0].addr, 0x40, 0);
+  check('обмен занял девять тактов', m.cycles, 9, 0);
 });
 
 console.log('\n' + '─'.repeat(50));
