@@ -20,8 +20,53 @@
     pinch: null,
     maxSteps: 900,
     dtMode: 'auto',
-    lastRate: 1
+    lastRate: 1,
+    skin: 'real'
   };
+
+  /* Оформление подписей и плашек для каждого вида стола. */
+  var THEMES = {
+    real: {
+      labelFg: '#15291f', labelSub: '#0f6b4e',
+      labelPill: 'rgba(255,255,255,.86)',
+      badgeBg: 'rgba(255,255,255,.9)', badgeFg: '#17503c'
+    },
+    schema: {
+      labelFg: '#dfe7ef', labelSub: '#7fd4c1',
+      labelPill: null,
+      badgeBg: 'rgba(10,16,23,.72)', badgeFg: 'rgba(143,232,205,.82)'
+    }
+  };
+
+  var LS_SKIN = 'electrocore.skin';
+
+  /** Переключает вид рабочего стола: реалистичные детали или условные знаки. */
+  function applySkin(sk, silent) {
+    if (sk !== 'real' && sk !== 'schema') sk = 'real';
+    state.skin = sk;
+    EC.skin = sk;
+    var th = THEMES[sk];
+    for (var k in th) EC.theme[k] = th[k];
+    document.body.classList.toggle('skin-real', sk === 'real');
+    document.body.classList.toggle('skin-schema', sk === 'schema');
+    refreshPreviews();
+    var seg = $('skinSeg');
+    if (seg) {
+      Array.prototype.forEach.call(seg.children, function (b) {
+        b.classList.toggle('on', b.getAttribute('data-skin') === sk);
+      });
+    }
+    try { localStorage.setItem(LS_SKIN, sk); } catch (e) { /* приватный режим */ }
+    if (!silent) toast(sk === 'real' ? 'Вид: реалистичные детали' : 'Вид: условная схема');
+  }
+
+  /** Перерисовывает миниатюры палитры под текущий вид. */
+  function refreshPreviews() {
+    Array.prototype.forEach.call(document.querySelectorAll('.pal-item'), function (n) {
+      var cv = n.querySelector('canvas');
+      if (cv) drawPreview(cv, n.getAttribute('data-type'));
+    });
+  }
 
   /* ================================================================== */
   /*  Запуск                                                            */
@@ -33,6 +78,10 @@
     circuit = new EC.Circuit();
     renderer = new EC.Renderer(board, circuit);
     scope = new EC.Scope(scopeCanvas, circuit);
+
+    var savedSkin = null;
+    try { savedSkin = localStorage.getItem(LS_SKIN); } catch (e) { /* приватный режим */ }
+    applySkin(savedSkin || 'real', true);
 
     buildPalette();
     buildExamples();
@@ -51,8 +100,10 @@
     }
     onResize();
 
+    refreshPreviews();
     var restored = loadLocal(true);
-    if (!restored) loadExample('led');
+    if (restored) { state.running = true; updateRunUI(); }
+    else loadExample('led');
     renderer.fit();
     requestAnimationFrame(frame);
 
@@ -120,7 +171,8 @@
     g.translate(canvas.width / 2, canvas.height / 2);
     g.scale(scale, scale);
     g.translate(-(b.x + b.w / 2) * GRID, -(b.y + b.h / 2) * GRID);
-    try { EC.defs[key].draw(g, c, { preview: true }); } catch (e) { /* пропускаем */ }
+    var art = (EC.skin === 'real' && EC.real && EC.real[key]) ? EC.real[key] : EC.defs[key].draw;
+    try { art(g, c, { preview: true, view: { zoom: 1 } }); } catch (e) { /* пропускаем */ }
     g.restore();
   }
 
@@ -219,6 +271,9 @@
     $('btnRedo').addEventListener('click', redo);
     $('btnRotate').addEventListener('click', rotateSelection);
     $('btnDelete').addEventListener('click', deleteSelection);
+    $('btnSkin').addEventListener('click', function () {
+      applySkin(state.skin === 'real' ? 'schema' : 'real');
+    });
     $('btnFit').addEventListener('click', function () { renderer.fit(); });
     $('btnZoomIn').addEventListener('click', function () { zoomBy(1.25); });
     $('btnZoomOut').addEventListener('click', function () { zoomBy(0.8); });
@@ -289,6 +344,10 @@
       else if (act === 'export') exportFile();
       else if (act === 'import') $('fileInput').click();
       else if (act === 'help') $('helpModal').hidden = false;
+    });
+    $('skinSeg').addEventListener('click', function (e) {
+      var sk = e.target.getAttribute && e.target.getAttribute('data-skin');
+      if (sk) applySkin(sk);
     });
     $('helpClose').addEventListener('click', function () { $('helpModal').hidden = true; });
     $('helpModal').addEventListener('click', function (e) {
@@ -678,6 +737,7 @@
       else if (k === 'w') setMode('wire');
       else if (k === 'e') setMode('erase');
       else if (k === 'r') rotateSelection();
+      else if (k === 'd') applySkin(state.skin === 'real' ? 'schema' : 'real');
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelection(); }
       else if (e.key === 'Escape') { disarm(); renderer.selection = []; updateInspector(); }
     });

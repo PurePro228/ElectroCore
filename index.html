@@ -42,10 +42,14 @@
 
     <div class="spacer"></div>
 
-    <div class="tool-group right-group">
+    <div class="tool-group examples-group">
       <select id="exampleSelect" class="select" title="Готовые схемы">
         <option value="">Примеры схем…</option>
       </select>
+    </div>
+
+    <div class="tool-group right-group">
+      <button id="btnSkin" class="btn" title="Переключить вид: детали или схема">◧<span class="lbl">Вид</span></button>
       <button id="btnFit" class="btn" title="Вписать в экран">⤢</button>
       <button id="btnMenu" class="btn" title="Файл и настройки">☰</button>
     </div>
@@ -150,6 +154,13 @@
     <hr>
     <button data-act="export">Экспорт в файл…</button>
     <button data-act="import">Импорт из файла…</button>
+    <div class="menu-seg">
+      <span>Вид рабочего стола</span>
+      <div class="seg" id="skinSeg">
+        <button data-skin="real">Детали</button>
+        <button data-skin="schema">Схема</button>
+      </div>
+    </div>
     <hr>
     <label class="menu-check"><input type="checkbox" id="optValues" checked> Показывать U / I / P</label>
     <label class="menu-check"><input type="checkbox" id="optCurrent" checked> Анимация тока</label>
@@ -176,6 +187,7 @@
         <h3>Сборка схемы</h3>
         <ul>
           <li>Коснитесь элемента в палитре, затем рабочего стола — элемент встанет на сетку.</li>
+          <li>Кнопка «Вид» вверху переключает рабочий стол между реалистичными деталями и условными обозначениями схемы.</li>
           <li>Потяните от кружка на конце вывода к другому выводу — появится провод.</li>
           <li>Перетаскивайте элементы, чтобы двигать их; провода перестроятся сами.</li>
           <li>Выключатели и кнопки переключаются касанием во время работы.</li>
@@ -192,6 +204,7 @@
           <tr><td>Пробел</td><td>пуск / пауза</td></tr>
           <tr><td>V / W / E</td><td>выбор / провод / стирание</td></tr>
           <tr><td>R</td><td>повернуть элемент</td></tr>
+          <tr><td>D</td><td>переключить вид стола</td></tr>
           <tr><td>Delete</td><td>удалить выделенное</td></tr>
           <tr><td>Ctrl + Z / Y</td><td>отменить / повторить</td></tr>
           <tr><td>Ctrl + D</td><td>дублировать</td></tr>
@@ -215,6 +228,7 @@
 <script src="js/components.js"></script>
 <script src="js/circuit.js"></script>
 <script src="js/render.js"></script>
+<script src="js/skins.js"></script>
 <script src="js/scope.js"></script>
 <script src="js/examples.js"></script>
 <script src="js/app.js"></script>

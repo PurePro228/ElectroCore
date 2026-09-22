@@ -18,6 +18,16 @@
   var GRID = 16;                 // размер клетки сетки в пикселях
   EC.GRID = GRID;
 
+  /* Вид рабочего стола: 'real' — реалистичные детали, 'schema' — условные знаки. */
+  EC.skin = 'real';
+  EC.theme = {
+    labelFg: '#dfe7ef',
+    labelSub: '#7fd4c1',
+    labelPill: null,        // подложка под подписью (в реалистичном виде)
+    badgeBg: 'rgba(10,16,23,.72)',
+    badgeFg: 'rgba(143,232,205,.82)'
+  };
+
   var defs = {};
   EC.defs = defs;
   var categories = [];
@@ -82,20 +92,58 @@
     lead(g, inner, 0, 2 * GRID, 0);
   }
 
-  /** Подпись под компонентом; rot компенсируется вызывающим кодом. */
+  /** Подпись под компонентом; поворот элемента компенсируется. */
   function label(g, c, lines, yOffset) {
+    var th = EC.theme;
     g.save();
     g.rotate(-(c.rot || 0) * Math.PI / 2);
     g.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     var y = yOffset === undefined ? GRID * 1.5 : yOffset;
-    for (var i = 0; i < lines.length; i++) {
-      if (!lines[i]) continue;
-      g.fillStyle = i === 0 ? '#dfe7ef' : '#7fd4c1';
-      g.fillText(lines[i], 0, y + i * 11);
+    var i, txt = [];
+    for (i = 0; i < lines.length; i++) if (lines[i]) txt.push(lines[i]);
+    if (!txt.length) { g.restore(); return; }
+
+    if (th.labelPill) {                       // наклейка под подписью
+      var wmax = 0;
+      for (i = 0; i < txt.length; i++) wmax = Math.max(wmax, g.measureText(txt[i]).width);
+      var pw = wmax + 9, ph = txt.length * 11 + 4;
+      g.fillStyle = th.labelPill;
+      roundRect(g, -pw / 2, y - 7.5, pw, ph, 4);
+      g.fill();
+    }
+    for (i = 0; i < txt.length; i++) {
+      g.fillStyle = i === 0 ? th.labelFg : th.labelSub;
+      g.fillText(txt[i], 0, y + i * 11);
     }
     g.restore();
+  }
+
+  /**
+   * Кеш градиентов: координаты градиента вычисляются в момент рисования,
+   * поэтому один объект можно переиспользовать во всех кадрах.
+   * Ключ — контекст, чтобы миниатюры в палитре не мешали основному холсту.
+   */
+  var gradStore = new WeakMap();
+  function grad(g, key, x0, y0, x1, y1, stops) {
+    var m = gradStore.get(g);
+    if (!m) { m = {}; gradStore.set(g, m); }
+    if (m[key]) return m[key];
+    var gr = g.createLinearGradient(x0, y0, x1, y1);
+    for (var i = 0; i < stops.length; i++) gr.addColorStop(stops[i][0], stops[i][1]);
+    m[key] = gr;
+    return gr;
+  }
+
+  function radial(g, key, x0, y0, r0, x1, y1, r1, stops) {
+    var m = gradStore.get(g);
+    if (!m) { m = {}; gradStore.set(g, m); }
+    if (m[key]) return m[key];
+    var gr = g.createRadialGradient(x0, y0, r0, x1, y1, r1);
+    for (var i = 0; i < stops.length; i++) gr.addColorStop(stops[i][0], stops[i][1]);
+    m[key] = gr;
+    return gr;
   }
 
   /** Экранчик измерительного прибора. */
@@ -143,7 +191,10 @@
     return [BAND_COLORS[d1], BAND_COLORS[d2], mul, '#c9a227'];
   }
 
-  EC.gfx = { roundRect: roundRect, lead: lead, leadsH: leadsH, label: label, lcd: lcd };
+  EC.gfx = {
+    roundRect: roundRect, lead: lead, leadsH: leadsH, label: label, lcd: lcd,
+    grad: grad, radial: radial, bandColors: BAND_COLORS, resistorBands: resistorBands
+  };
 
   /* ================================================================== */
   /*  ПАССИВНЫЕ ЭЛЕМЕНТЫ                                                */
