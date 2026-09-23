@@ -32,7 +32,7 @@
     voltmeter: 'PV', ammeter: 'PA', wattmeter: 'PW', probe: 'X', ground: '', junction: '',
     thermistor: 'RK', photoresistor: 'RL', transformer: 'TV', schottky: 'VD', bridge: 'VD',
     regulator: 'DA', motor: 'M', buzzer: 'HA',
-    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD', cpu8: 'DD', cpu_bus: 'DD', memory: 'DD',
+    not_gate: 'DD', and_gate: 'DD', or_gate: 'DD', ne555: 'DD', cpu8: 'DD', cpu_bus: 'DD', memory: 'DD', board32: 'DD',
     seg7: 'HG', seg7x4: 'HG', matrix8: 'HG', sr595: 'DD', max7219: 'DD',
     nand_gate: 'DD', nor_gate: 'DD', xor_gate: 'DD', dff: 'DD', cd4017: 'DD',
     uln2003: 'DD', optocoupler: 'U', oscillator: 'G'
@@ -74,6 +74,15 @@
   };
 
   Component.prototype.pinCount = function () { return this.def().pins.length; };
+
+  /** Точка мира → координаты внутри детали (поворот снят). */
+  Component.prototype.local = function (wx, wy) {
+    var dx = wx - this.x, dy = wy - this.y, r = ((this.rot % 4) + 4) % 4;
+    if (r === 0) return { x: dx, y: dy };
+    if (r === 1) return { x: dy, y: -dx };
+    if (r === 2) return { x: -dx, y: -dy };
+    return { x: -dy, y: dx };
+  };
 
   /** Габаритный прямоугольник в клетках (для попадания курсором). */
   Component.prototype.bounds = function () {

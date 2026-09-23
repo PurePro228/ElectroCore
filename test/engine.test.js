@@ -4,7 +4,7 @@
 'use strict';
 const path = require('path');
 global.window = {};
-['util', 'i18n', 'solver', 'cpu', 'components', 'display', 'chips', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
+['util', 'i18n', 'solver', 'cpu', 'components', 'display', 'chips', 'board', 'circuit', 'render', 'skins', 'scope', 'examples', 'aiprompt'].forEach(function (m) {
   require(path.join(__dirname, '..', 'js', m + '.js'));
 });
 const EC = global.window.EC;
@@ -1925,6 +1925,176 @@ test('Схема на английском языке считается так 
   }
   check('счёт идёт и по-английски', seen.indexOf('0000') >= 0 && seen.length >= 2 ? 1 : 0, 1, 0);
   EC.lang = 'ru';
+});
+
+test('Плата EC-32: два порта по восемь линий', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -20, 0); bat.props.V = 5; bat.props.Rint = 1e-3;
+  const gnd = ct.add('ground', -20, 20);
+  const brd = ct.add('board32', 0, 0);
+  brd.props.freq = 4000;
+  brd.props.code = [
+    '        LDI 0b11111111',
+    '        DIR',
+    '        DIRB',
+    '        LDI 0b10100101',
+    '        OUT',
+    '        NOT',
+    '        OUTB',
+    '        HLT'
+  ].join('\n');
+  ct.connect(bat.id, 0, brd.id, 0);
+  ct.connect(brd.id, 1, gnd.id, 0);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  // все шестнадцать линий через резисторы на землю, чтобы видеть уровни
+  const rs = [];
+  for (let k = 0; k < 16; k++) {
+    const r = ct.add('resistor', 14, -16 + k * 2); r.props.R = 4700;
+    ct.connect(brd.id, k < 7 ? 3 + k : 10 + (k - 7), r.id, 0);
+    ct.connect(r.id, 1, gnd.id, 0);
+    rs.push(r);
+  }
+  ct.reroute();
+  ct.reset();
+  run(ct, 0.02, 1 / 8000);
+  check('программа платы собралась', brd.state.asm.ok ? 1 : 0, 1, 0);
+  check('программа без предупреждений', brd.state.asm.warnings.length, 0, 0);
+  check('первый порт получил байт', brd.state.m.port, 0xA5, 0);
+  check('второй порт получил обратный байт', brd.state.m.portB, 0x5A, 0);
+  let hi = 0;
+  for (let k = 0; k < 16; k++) {
+    const want = k < 8 ? (0xA5 >> k) & 1 : (0x5A >> (k - 8)) & 1;
+    const v = Math.abs(rs[k].v);
+    if ((want && v > 4) || (!want && v < 0.5)) hi++;
+  }
+  check('все шестнадцать выводов стоят как велено', hi, 16, 0);
+  // вход сброса держит машину в начале
+  const sw = ct.add('switch', 0, 24);
+  sw.props.closed = true;
+  ct.connect(brd.id, 2, sw.id, 0);
+  ct.connect(sw.id, 1, gnd.id, 0);
+  ct.reroute();
+  ct.reset();
+  run(ct, 5e-3, 1 / 8000);
+  check('сброс держит счётчик команд в нуле', brd.state.m.pc, 0, 0);
+  check('на сбросе линии обесточены', brd.state.m.port, 0, 0);
+});
+
+test('Клавиатура 4×4: кнопка соединяет ряд со столбцом', function () {
+  const ct = new EC.Circuit();
+  const bat = ct.add('battery', -20, 0); bat.props.V = 5; bat.props.Rint = 1e-3;
+  const gnd = ct.add('ground', -20, 20);
+  const kp = ct.add('keypad16', 20, 0);
+  // ряд R2 под напряжением, столбцы через резисторы на землю
+  ct.connect(bat.id, 0, kp.id, EC.KP_ROW[1]);
+  ct.connect(bat.id, 1, gnd.id, 0);
+  const rs = [];
+  for (let q = 0; q < 4; q++) {
+    const r = ct.add('resistor', 40, -6 + q * 4); r.props.R = 10000;
+    ct.connect(kp.id, EC.KP_COL[q], r.id, 0);
+    ct.connect(r.id, 1, gnd.id, 0);
+    rs.push(r);
+  }
+  ct.reroute();
+  ct.reset();
+  run(ct, 1e-3);
+  check('без нажатия столбцы молчат', Math.max(...rs.map(r => Math.abs(r.v))) < 0.01 ? 1 : 0, 1, 0);
+  check('без нажатия нечего показывать', kp.key, -1, 0);
+
+  kp.pressed = 6;                            // S6 — ряд R2, столбец C2
+  run(ct, 1e-3);
+  check('отозвался ровно один столбец', rs.filter(r => Math.abs(r.v) > 4).length, 1, 0);
+  check('и это второй столбец', Math.abs(rs[1].v), 5, 0.05);
+  check('подпись показывает кнопку', kp.level === 'S6' ? 1 : 0, 1, 0);
+
+  kp.pressed = 7;                            // S7 — ряд R2, столбец C3
+  run(ct, 1e-3);
+  check('нажали соседнюю — отозвался третий столбец', Math.abs(rs[2].v), 5, 0.05);
+  check('второй столбец замолчал', Math.abs(rs[1].v) < 0.01 ? 1 : 0, 1, 0);
+
+  kp.pressed = 2;                            // S2 — ряд R1, к питанию не подключён
+  run(ct, 1e-3);
+  check('кнопка другого ряда ничего не даёт',
+    Math.max(...rs.map(r => Math.abs(r.v))) < 0.01 ? 1 : 0, 1, 0);
+
+  // попадание пальцем по клеткам платы
+  const def = kp.def();
+  check('нажатие в левом верхнем углу — это S1', def.hit(kp, -5.5, -9.5), 1, 0);
+  check('нажатие в правом нижнем — это S16', def.hit(kp, 15.5, 11.5), 16, 0);
+  check('между кнопками — мимо', def.hit(kp, -2, -9.5), 0, 0);
+  // те же клетки, но деталь повёрнута: местные координаты снимаются с поворота
+  kp.rot = 1;
+  const l = kp.local(kp.x + 9.5, kp.y - 5.5);
+  check('после поворота попадание считается верно', def.hit(kp, l.x, l.y), 1, 0);
+});
+
+test('Клавиатура на плате: нажатие видно на индикаторе', function () {
+  const ct = EC.examples.find(e => e.id === 'keypad').make();
+  const brd = ct.components.find(c => c.type === 'board32');
+  const kp = ct.components.find(c => c.type === 'keypad16');
+  const disp = ct.components.find(c => c.type === 'seg7');
+  const dt = 1 / 12000;
+  check('программа примера собралась', brd.state.asm.ok ? 1 : 0, 1, 0);
+  check('свободное место осталось', brd.state.asm.free > 150 ? 1 : 0, 1, 0);
+  run(ct, 0.05, dt);
+  check('пока не нажато — индикатор погашен', disp.i < 1e-3 ? 1 : 0, 1, 0);
+
+  const GLYPH = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07,
+    0x7F, 0x6F, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71];
+  let right = 0;
+  [1, 4, 7, 11, 16].forEach(function (key) {
+    kp.pressed = key;
+    run(ct, 0.1, dt);
+    if (brd.state.m.port === GLYPH[key - 1]) right++;
+    kp.pressed = false;
+    run(ct, 0.15, dt);
+  });
+  check('каждая из пяти кнопок дала своё начертание', right, 5, 0);
+  check('после отпускания индикатор гаснет', disp.i < 1e-3 ? 1 : 0, 1, 0);
+  kp.pressed = 1;
+  run(ct, 0.1, dt);
+  check('ток сегмента в норме', disp.i / 6, 0.012, 0.004);
+  check('индикатор не жалуется на ток', disp.warn ? 1 : 0, 0, 0);
+});
+
+test('Новые команды второго порта и адреса вида «метка+N»', function () {
+  const A = EC.cpu.assemble;
+  let r = A('LDI 0xFF\nDIRB\nLDI 0x81\nOUTB\nHLT');
+  check('OUTB собирается', r.ok ? 1 : 0, 1, 0);
+  const m = EC.cpu.create(); m.mask = 0xFF; EC.cpu.load(m, r.code);
+  for (let i = 0; i < 6; i++) EC.cpu.step(m);
+  check('второй порт настроен', m.ddrB, 0xFF, 0);
+  check('второй порт выдал байт', m.portB, 0x81, 0);
+  check('первый порт не задет', m.port, 0, 0);
+
+  m.pinsB = 0x3C;
+  r = A('INB\nHLT');
+  EC.cpu.load(m, r.code); m.pc = 0; m.halted = false;
+  EC.cpu.step(m);
+  check('INB читает второй порт', m.a, 0x3C, 0);
+
+  // у микроконтроллера EC-8 порт четырёхразрядный и маска его режет
+  const small = EC.cpu.create();
+  EC.cpu.load(small, A('LDI 0xFF\nOUT\nHLT').code);
+  EC.cpu.step(small); EC.cpu.step(small);
+  check('у EC-8 наружу выходят только четыре бита', small.port, 0x0F, 0);
+
+  // выборка байта из таблицы правкой собственного операнда
+  r = A([
+    'старт:  LDI 2',
+    '        ADDI цифры',
+    '        ST взять+1',
+    'взять:  LD цифры',
+    '        HLT',
+    'цифры:  DB 0x3F 0x06 0x5B'
+  ].join('\n'));
+  check('самоизменяющаяся программа собралась', r.ok ? 1 : 0, 1, 0);
+  check('приём с «метка+N» не считается ошибкой', r.warnings.length, 0, 0);
+  const sm = EC.cpu.create(); EC.cpu.load(sm, r.code);
+  for (let i = 0; i < 5; i++) EC.cpu.step(sm);
+  check('в A оказался третий байт таблицы', sm.a, 0x5B, 0);
+  check('«метка−N» тоже понятна', A('метка: NOP\nJMP метка+0').ok ? 1 : 0, 1, 0);
+  check('бессмысленный операнд по-прежнему ошибка', A('LDI нечто+1').ok ? 1 : 0, 0, 0);
 });
 
 console.log('\n' + '─'.repeat(50));

@@ -406,4 +406,127 @@
       label(g, c, [c.name || ''], h / 2 + GRID * 0.9);
     }
   });
+
+  /* ================================================================== */
+  /*  Клавиатура 4 × 4                                                  */
+  /* ================================================================== */
+
+  /* Выводы идут одной гребёнкой слева, как на настоящем модуле:
+     сверху вниз C4, C3, C2, C1, R1, R2, R3, R4. */
+  var KP_NAMES = ['C4', 'C3', 'C2', 'C1', 'R1', 'R2', 'R3', 'R4'];
+  var KP_COL = [3, 2, 1, 0];                   // столбцы C1…C4 → индексы выводов
+  var KP_ROW = [4, 5, 6, 7];                   // ряды R1…R4 → индексы выводов
+
+  var KP_PINS = [];
+  KP_NAMES.forEach(function (t, i) { KP_PINS.push({ i: i, t: t }); });
+
+  function keypadPins() {
+    return KP_NAMES.map(function (t, i) {
+      return { x: -19, y: -7 + i * 2, name: t };
+    });
+  }
+
+  /* Кнопки на плате: четыре ряда по четыре, S1 в левом верхнем углу. */
+  var KP_W = 34, KP_H = 30;
+  var KP_X0 = -5.5, KP_STEP = 7, KP_Y0 = -9.5, KP_SIZE = 4.6;
+
+  /** Центр кнопки номер k (0…15) в клетках. */
+  function keyCenter(k) {
+    return { x: KP_X0 + (k & 3) * KP_STEP, y: KP_Y0 + (k >> 2) * KP_STEP };
+  }
+
+  define({
+    key: 'keypad16', name: 'Клавиатура 4×4', cat: 'switch',
+    tip: 'Шестнадцать кнопок и всего восемь проводов: каждая кнопка соединяет свой ряд со своим столбцом. Чтобы узнать, что нажато, подают единицу по очереди на ряды R1…R4 и смотрят, на каком из столбцов C1…C4 она появилась.',
+    pins: keypadPins(),
+    box: { w: KP_W, h: KP_H },
+    momentary: true,
+    /** Какая кнопка под пальцем: 0 — мимо, 1…16 — номер кнопки. */
+    hit: function (c, lx, ly) {
+      for (var k = 0; k < 16; k++) {
+        var p = keyCenter(k);
+        if (Math.abs(lx - p.x) <= KP_SIZE / 2 && Math.abs(ly - p.y) <= KP_SIZE / 2) return k + 1;
+      }
+      return 0;
+    },
+    stamp: function (c, ctx) {
+      var m = ctx.mna, n = c.n;
+      var k = (c.pressed | 0) - 1;
+      for (var i = 0; i < 16; i++) {
+        var on = i === k;
+        m.conductance(n[KP_ROW[i >> 2]], n[KP_COL[i & 3]], on ? 1 / 0.002 : 1e-12);
+      }
+    },
+    post: function (c, ctx) {
+      var k = (c.pressed | 0) - 1;
+      c.key = k;
+      c.level = k < 0 ? '—' : 'S' + (k + 1);
+      if (k >= 0) {
+        c.v = ctx.nv(c.n[KP_ROW[k >> 2]]) - ctx.nv(c.n[KP_COL[k & 3]]);
+        c.i = c.v / 0.002;
+      } else { c.v = 0; c.i = 0; }
+      c.pinI = null;
+    },
+    draw: function (g, c) {
+      var w = KP_W * GRID, h = KP_H * GRID;
+      c.def().pins.forEach(function (p) {
+        lead(g, p.x * GRID, p.y * GRID, -w / 2, p.y * GRID);
+      });
+      // зелёная плата
+      g.fillStyle = 'rgba(16,40,28,.2)';
+      roundRect(g, -w / 2 + 3, -h / 2 + 4, w, h, 4); g.fill();
+      g.fillStyle = gfx.grad(g, 'kpBoard', 0, -h / 2, 0, h / 2, [
+        [0, '#1f8a54'], [0.5, '#177546'], [1, '#115c38']
+      ]);
+      roundRect(g, -w / 2, -h / 2, w, h, 4); g.fill();
+      g.strokeStyle = 'rgba(8,40,26,.6)'; g.lineWidth = 1.2;
+      roundRect(g, -w / 2, -h / 2, w, h, 4); g.stroke();
+      // гребёнка выводов
+      g.fillStyle = 'rgba(22,26,30,.95)';
+      roundRect(g, -w / 2 + 2, -8.5 * GRID, GRID * 1.6, 15 * GRID, 2); g.fill();
+      var k, p, s = KP_SIZE * GRID;
+      for (k = 0; k < 16; k++) {
+        p = keyCenter(k);
+        var cx = p.x * GRID, cy = p.y * GRID;
+        var down = (c.pressed | 0) === k + 1;
+        // металлический корпус кнопки
+        g.fillStyle = gfx.grad(g, 'kpCase', 0, -s / 2, 0, s / 2, [
+          [0, '#d3d8dc'], [0.4, '#a9b0b6'], [1, '#7d858c']
+        ]);
+        g.save(); g.translate(cx, cy);
+        roundRect(g, -s / 2, -s / 2, s, s, 2); g.fill();
+        g.strokeStyle = 'rgba(40,48,54,.6)'; g.lineWidth = 0.9;
+        roundRect(g, -s / 2, -s / 2, s, s, 2); g.stroke();
+        // четыре лапки
+        g.fillStyle = 'rgba(180,188,194,.9)';
+        for (var q = 0; q < 4; q++) {
+          var qx = (q & 1 ? 1 : -1) * s * 0.42, qy = (q & 2 ? 1 : -1) * s * 0.42;
+          g.beginPath(); g.arc(qx, qy, s * 0.09, 0, 7); g.fill();
+        }
+        // чёрный толкатель
+        g.fillStyle = down ? '#14181c' : '#22282e';
+        g.beginPath(); g.arc(0, 0, s * (down ? 0.24 : 0.27), 0, 7); g.fill();
+        if (!down) {
+          g.fillStyle = 'rgba(255,255,255,.09)';
+          g.beginPath(); g.ellipse(-s * 0.06, -s * 0.08, s * 0.16, s * 0.09, -0.5, 0, 7); g.fill();
+        }
+        g.restore();
+      }
+      // шелкография S1…S16
+      g.save();
+      g.rotate(-(c.rot || 0) * Math.PI / 2);
+      g.font = '700 6.5px ui-monospace, Menlo, monospace';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = 'rgba(232,245,238,.85)';
+      for (k = 0; k < 16; k++) {
+        p = keyCenter(k);
+        g.fillText('S' + (k + 1), p.x * GRID, (p.y + 3.2) * GRID);
+      }
+      g.restore();
+      gfx.chipPins(g, c, KP_PINS, w * 0.93, 5.6);
+      label(g, c, [(c.name || '') + '  ' + EC.t(c.level || '')], h / 2 + GRID * 0.9);
+    }
+  });
+  EC.KP_COL = KP_COL;
+  EC.KP_ROW = KP_ROW;
 })(window);

@@ -769,7 +769,7 @@
     if (state.mode === 'hand') {
       if (comp) {
         var hdef = comp.def();
-        if (hdef.momentary) comp.pressed = true;
+        if (hdef.momentary) comp.pressed = pressValue(comp, w);
         state.action = { type: 'press', comp: comp };
         return;
       }
@@ -843,7 +843,7 @@
       updateInspector();
       markInspectorAvailable();
       var def = comp.def();
-      if (def.momentary) { comp.pressed = true; }
+      if (def.momentary) { comp.pressed = pressValue(comp, w); }
       state.action = {
         type: 'move', start: w, moved: false, comp: comp,
         origin: renderer.selection.map(function (c) { return { c: c, x: c.x, y: c.y }; })
@@ -1180,7 +1180,7 @@
     ms.appendChild(rd);
     if (def.key === 'npn' || def.key === 'pnp' || def.key === 'nmos' ||
       def.key === 'pmos' || def.key === 'cpu8' || def.key === 'cpu_bus' ||
-      def.key === 'memory') {
+      def.key === 'memory' || def.key === 'board32') {
       ms.appendChild(U.el('div', { class: 'insp-tip', id: 'liveExtra' }));
     }
     body.appendChild(ms);
@@ -1189,7 +1189,7 @@
     /* действия */
     var as = U.el('div', { class: 'insp-section' });
     var acts2 = U.el('div', { class: 'insp-actions' });
-    if (def.key === 'cpu8' || def.key === 'cpu_bus') {
+    if (def.key === 'cpu8' || def.key === 'cpu_bus' || def.key === 'board32') {
       acts2.appendChild(actionBtn(t('Перезапустить'), function () {
         if (def.init) def.init(c);
         toast('Процессор перезапущен');
@@ -1361,6 +1361,13 @@
         { k: 'B', v: EC.cpu.hex(mach.b), cls: 'amber' },
         { k: 'PC', v: EC.cpu.hex(mach.pc), cls: 'blue' }
       ] : [{ k: '—', v: '—' }];
+    } else if (def.key === 'board32') {
+      var mbd = c.state && c.state.m;
+      rows = mbd ? [
+        { k: 'A', v: EC.cpu.hex(mbd.a) },
+        { k: t('порт A'), v: EC.cpu.hex(mbd.port), cls: 'amber' },
+        { k: t('порт B'), v: EC.cpu.hex(mbd.portB), cls: 'blue' }
+      ] : [{ k: '—', v: '—' }];
     } else if (def.key === 'cpu_bus') {
       var mb = c.state && c.state.m;
       rows = mb ? [
@@ -1407,6 +1414,13 @@
       var flags = (mm.z ? 'Z' : '·') + (mm.c ? 'C' : '·');
       var where = c.inReset ? t('сброс') : (mm.halted ? t('остановлен') : EC.cpu.disassemble(mm.mem, mm.pc).text);
       extra.textContent = t('Флаги ') + flags + t(' · такт ') + mm.cycles + ' · ' + where;
+    } else if (def.key === 'board32') {
+      var mbd2 = c.state && c.state.m;
+      if (!mbd2) { extra.textContent = ''; return; }
+      var flb = (mbd2.z ? 'Z' : '·') + (mbd2.c ? 'C' : '·');
+      var wh2 = c.inReset ? t('сброс')
+        : (mbd2.halted ? t('остановлен') : EC.cpu.disassemble(mbd2.mem, mbd2.pc).text);
+      extra.textContent = t('Флаги ') + flb + t(' · такт ') + mbd2.cycles + ' · ' + wh2;
     } else if (def.key === 'cpu_bus') {
       var mx = c.state && c.state.m;
       if (!mx) { extra.textContent = ''; return; }
@@ -1580,6 +1594,15 @@
    * пропадает от случайного касания, а на мыши то же самое делает
    * Shift с нажатием.
    */
+  /** Что записать в comp.pressed: true или номер кнопки под пальцем. */
+  function pressValue(comp, w) {
+    var def = comp.def();
+    if (!def.hit) return true;
+    var l = comp.local(w.x, w.y);
+    var k = def.hit(comp, l.x, l.y);
+    return k || false;
+  }
+
   function askDelete(pt, what, onYes) {
     var pop = $('confirmPop');
     if (!pop) { onYes(); return; }
@@ -1710,6 +1733,10 @@
       if (c.type === 'cpu_bus' && c.props.clkSrc === 'internal') {
         // за один шаг расчёта процессор делает не больше одного обмена
         dt = Math.min(dt, 1 / (Math.max(c.props.freq, 1) * 4));
+      }
+      if (c.type === 'board32') {
+        // на шаг расчёта должно приходиться не больше одной команды
+        dt = Math.min(dt, 1 / (Math.max(c.props.freq, 1) * 2));
       }
       if (c.type === 'cpu8' && c.props.clkSrc === 'internal') {
         // на шаг должно приходиться не больше одной команды, иначе схема

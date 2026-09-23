@@ -46,6 +46,9 @@
     { op: 0x30, m: 'OUT', arg: 0, t: 'выдать A на выводы' },
     { op: 0x31, m: 'IN', arg: 0, t: 'считать выводы в A' },
     { op: 0x32, m: 'DIR', arg: 0, t: 'настроить направление выводов по A' },
+    { op: 0x33, m: 'OUTB', arg: 0, t: 'выдать A на второй порт' },
+    { op: 0x34, m: 'INB', arg: 0, t: 'считать второй порт в A' },
+    { op: 0x35, m: 'DIRB', arg: 0, t: 'настроить направление второго порта' },
     { op: 0xFF, m: 'HLT', arg: 0, t: 'остановить процессор' }
   ];
 
@@ -139,6 +142,15 @@
       var n = parseNumber(tok);
       if (n !== null) return n;
       if (labels[tok] !== undefined) return labels[tok];
+      // «метка+2» и «метка−1»: так правят операнд соседней команды
+      var m2 = /^([^+\-]+)\s*([+\-])\s*(\S+)$/.exec(tok);
+      if (m2) {
+        var base = labels[m2[1]] !== undefined ? labels[m2[1]] : parseNumber(m2[1]);
+        var off = parseNumber(m2[3]);
+        if (base !== null && base !== undefined && off !== null) {
+          return (m2[2] === '+' ? base + off : base - off) & 0xFF;
+        }
+      }
       fail(line, 'непонятный операнд «' + tok + '»');
       return 0;
     }
@@ -152,17 +164,28 @@
      */
     function checkData() {
       if (errors.length) return;
-      var taken = {};
-      for (var k in labels) if (labels.hasOwnProperty(k)) taken[labels[k]] = k;
+      function resolveQuiet(tok) {
+        if (labels[tok] !== undefined) return labels[tok];
+        var mm = /^([^+\-]+)\s*([+\-])\s*(\S+)$/.exec(String(tok || ''));
+        if (!mm) return null;
+        var base = labels[mm[1]] !== undefined ? labels[mm[1]] : parseNumber(mm[1]);
+        var off = parseNumber(mm[3]);
+        if (base === null || base === undefined || off === null) return null;
+        return (mm[2] === '+' ? base + off : base - off) & 0xFF;
+      }
       for (var j = 0; j < items.length; j++) {
         var it = items[j];
         if (!it || !it.def) continue;
         if (it.def.op !== 0x02 && it.def.op !== 0x03) continue;   // только LD и ST
+        // адрес по метке автор выбрал осознанно, а «метка+N» — это уже
+        // приём самоизменения кода: и то и другое сделано нарочно
         var byLabel = labels[it.arg] !== undefined;
-        var a = byLabel ? labels[it.arg] : parseNumber(it.arg);
-        if (a === null || a === undefined) continue;
+        var byExpr = /^[^+\-]+\s*[+\-]\s*\S+$/.test(String(it.arg || ''));
         var store = it.def.op === 0x03;
-        if (a < addr && (store || !byLabel)) {
+        var a = parseNumber(it.arg);
+        if (a === null) a = resolveQuiet(it.arg);
+        if (a === null || a === undefined) continue;
+        if (a < addr && !byExpr && (store || !byLabel)) {
           warn(it.line, 'ячейка 0x' + hex(a) + ' лежит внутри программы — она занимает ' +
             addr + ' байт, и запись туда испортит сам код. Возьми адрес выше 0x' + hex(addr));
         } else if (a >= 0xFD) {
@@ -204,6 +227,8 @@
       z: false, c: false,
       halted: false,
       port: 0, ddr: 0, pins: 0,               // выход, направление, состояние входов
+      portB: 0, ddrB: 0, pinsB: 0,            // второй порт, если он есть у платы
+      mask: PORT_MASK,                        // сколько линий у первого порта
       cycles: 0
     };
     return m;
@@ -220,6 +245,7 @@
     m.z = false; m.c = false;
     m.halted = false;
     m.port = 0; m.ddr = 0;
+    m.portB = 0; m.ddrB = 0;
     m.cycles = 0;
   }
 
@@ -271,9 +297,12 @@
         m.sp = (m.sp + 1) & 0xFF;
         next = m.mem[m.sp];
         break;
-      case 0x30: m.port = m.a & PORT_MASK; break;
-      case 0x31: m.a = m.pins & PORT_MASK; setZ(m, m.a); break;
-      case 0x32: m.ddr = m.a & PORT_MASK; break;
+      case 0x30: m.port = m.a & m.mask; break;
+      case 0x31: m.a = m.pins & m.mask; setZ(m, m.a); break;
+      case 0x32: m.ddr = m.a & m.mask; break;
+      case 0x33: m.portB = m.a; break;
+      case 0x34: m.a = m.pinsB; setZ(m, m.a); break;
+      case 0x35: m.ddrB = m.a; break;
       case 0xFF: m.halted = true; return;
       default: break;                          // неизвестный байт пропускается
     }
@@ -307,6 +336,8 @@
       phase: PH_CODE, op: 0, arg: 0,
       stack: new Uint8Array(STACK_DEPTH), sp: 0,
       port: 0, ddr: 0, pins: 0,
+      portB: 0, ddrB: 0, pinsB: 0,
+      mask: PORT_MASK,
       cycles: 0,
       addr: 0, rd: true, wr: true,       // управление активно низким уровнем
       dataOut: 0, driveData: false,
@@ -323,6 +354,7 @@
     m.phase = PH_CODE; m.op = 0; m.arg = 0;
     m.sp = 0;
     m.port = 0; m.ddr = 0;
+    m.portB = 0; m.ddrB = 0;
     m.cycles = 0;
     busUpdate(m);
   }
@@ -413,9 +445,12 @@
       case 0x26:
         if (m.sp > 0) m.pc = m.stack[--m.sp];
         break;
-      case 0x30: m.port = m.a & PORT_MASK; break;
-      case 0x31: m.a = m.pins & PORT_MASK; setZ(m, m.a); break;
-      case 0x32: m.ddr = m.a & PORT_MASK; break;
+      case 0x30: m.port = m.a & m.mask; break;
+      case 0x31: m.a = m.pins & m.mask; setZ(m, m.a); break;
+      case 0x32: m.ddr = m.a & m.mask; break;
+      case 0x33: m.portB = m.a; break;
+      case 0x34: m.a = m.pinsB; setZ(m, m.a); break;
+      case 0x35: m.ddrB = m.a; break;
       case 0xFF: m.halted = true; break;
       default: break;
     }

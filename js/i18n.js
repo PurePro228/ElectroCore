@@ -1414,4 +1414,125 @@
     '      конца — иначе программа затрёт сама себя':
       '      end — otherwise the program overwrites itself',
   });
+
+  /* ================================================================== */
+  /*  Клавиатура и плата EC-32                                          */
+  /* ================================================================== */
+
+  add({
+    'Клавиатура 4×4':
+      'Keypad 4×4',
+    'Шестнадцать кнопок и всего восемь проводов: каждая кнопка соединяет свой ряд со своим столбцом. Чтобы узнать, что нажато, подают единицу по очереди на ряды R1…R4 и смотрят, на каком из столбцов C1…C4 она появилась.':
+      'Sixteen buttons on just eight wires: every button joins its own row to its own column. To find out what is pressed, a one is put on rows R1…R4 in turn and the columns C1…C4 are watched to see where it shows up.',
+    'Плата EC-32':
+      'EC-32 board',
+    'Готовый модуль на процессоре EC-8: на плате уже стоят сам процессор, память на 256 байт и расширитель портов. Наружу выведены шестнадцать линий: P0…P7 — первый порт (OUT, IN, DIR), P8…P15 — второй (OUTB, INB, DIRB). Оба вывода GND — один и тот же общий провод.':
+      'A ready module built around the EC-8 processor: the processor itself, 256 bytes of memory and a port expander already sit on the board. Sixteen lines come out: P0…P7 are the first port (OUT, IN, DIR), P8…P15 the second one (OUTB, INB, DIRB). Both GND pins are the same common wire.',
+    'Подтяжка входов':
+      'Input pull-down',
+    '; Плата EC-32: шестнадцать линий вместо четырёх.\n; P0…P7 — первый порт (OUT, IN, DIR),\n; P8…P15 — второй порт (OUTB, INB, DIRB).\n; Огонёк бежит по первому порту и возвращается по второму.\n\n        LDI 0b11111111\n        DIR             ; P0…P7 — выходы\n        DIRB            ; P8…P15 — тоже выходы\n\n        LDI 1\n        ST 0xF0         ; текущий огонёк\n\nцикл:   LD 0xF0\n        OUT             ; на P0…P7\n        NOT\n        OUTB            ; на P8…P15 — наоборот\n        CALL пауза\n        LD 0xF0\n        SHL             ; сдвинуть влево\n        JNZ дальше\n        LDI 1           ; дошли до края — начать заново\nдальше: ST 0xF0\n        JMP цикл\n\nпауза:  LDI 60\n        ST 0xF1\nвн:     LD 0xF1\n        DEC\n        ST 0xF1\n        JNZ вн\n        RET':
+      '; The EC-32 board: sixteen lines instead of four.\n; P0…P7 — the first port (OUT, IN, DIR),\n; P8…P15 — the second port (OUTB, INB, DIRB).\n; The light runs along the first port and back along the second.\n\n        LDI 0b11111111\n        DIR                 ; P0…P7 — outputs\n        DIRB                ; P8…P15 — outputs too\n\n        LDI 1\n        ST 0xF0             ; the light we carry\n\nloop:   LD 0xF0\n        OUT                 ; onto P0…P7\n        NOT\n        OUTB                ; onto P8…P15 — the other way round\n        CALL delay\n        LD 0xF0\n        SHL                 ; shift it left\n        JNZ next\n        LDI 1               ; hit the edge — start over\nnext:   ST 0xF0\n        JMP loop\n\ndelay:  LDI 60\n        ST 0xF1\nwait:   LD 0xF1\n        DEC\n        ST 0xF1\n        JNZ wait\n        RET',
+    'ПИТ':
+      'PWR',
+    'РАБ':
+      'ACT',
+    'работа':
+      'running',
+    'порт A':
+      'port A',
+    'порт B':
+      'port B',
+    'выдать A на второй порт':
+      'send A to the second port',
+    'считать второй порт в A':
+      'read the second port into A',
+    'настроить направление второго порта':
+      'set the direction of the second port',
+    'Клавиатура 4×4 и плата EC-32':
+      'Keypad 4×4 and the EC-32 board',
+    'У платы EC-32 шестнадцать линий, и здесь заняты все: P0…P6 светят сегментами индикатора, P8…P11 по очереди подают единицу на ряды клавиатуры, P12…P15 слушают столбцы. Нажмите любую кнопку — на индикаторе появится её знак: S1 — это 0, S16 — это F. Начертания знаков лежат в таблице, а программа сама правит адрес у команды LD, чтобы взять из неё нужный байт.':
+      'The EC-32 board has sixteen lines and every one of them is busy here: P0…P6 light the segments of the display, P8…P11 put a one on the keypad rows in turn, P12…P15 listen to the columns. Press any button and its glyph shows up on the display: S1 is 0, S16 is F. The glyphs live in a table, and the program patches the address inside its own LD instruction to pick the right byte out of it.',
+    '; Клавиатура 4×4 на плате EC-32.\n; P0…P6 — сегменты, P8…P11 — ряды, P12…P15 — столбцы.\n\n        LDI 0b01111111\n        DIR             ; P0…P6 — выходы на сегменты\n        LDI 0b00001111\n        DIRB            ; P8…P11 — выходы, P12…P15 — входы\n\nцикл:   LDI 1\n        ST 0xF0         ; маска ряда: единица бежит по P8…P11\n        LDI 0\n        ST 0xF1         ; номер кнопки\n\nопрос:  LD 0xF0\n        OUTB            ; подать единицу на один ряд\n        INB             ; и посмотреть на столбцы\n        ANDI 0b11110000\n        JNZ нашли       ; какой-то столбец отозвался\n        LD 0xF1\n        ADDI 4          ; следующий ряд — это ещё четыре кнопки\n        ST 0xF1\n        LD 0xF0\n        SHL\n        ANDI 0b00001111\n        ST 0xF0\n        JNZ опрос       ; ряды ещё не кончились\n        LDI 0\n        OUT             ; ничего не нажато — индикатор погашен\n        JMP цикл\n\n; в старшей тетраде — отозвавшиеся столбцы, ищем младший\nнашли:  SHR\n        SHR\n        SHR\n        SHR\n        ST 0xF2\nпоиск:  LD 0xF2\n        SHR\n        ST 0xF2\n        JC готово\n        LD 0xF1\n        INC\n        ST 0xF1\n        JMP поиск\n\n; номер знаем — берём начертание из таблицы\nготово: LD 0xF1\n        ADDI цифры\n        ST взять+1      ; правим адрес у следующей команды\nвзять:  LD цифры\n        OUT\n        JMP цикл\n\n; начертания: 0…9, затем A b C d E F\nцифры:  DB 0x3F 0x06 0x5B 0x4F\n        DB 0x66 0x6D 0x7D 0x07\n        DB 0x7F 0x6F 0x77 0x7C\n        DB 0x39 0x5E 0x79 0x71':
+      '; A 4×4 keypad on the EC-32 board.\n; P0…P6 — segments, P8…P11 — rows, P12…P15 — columns.\n\n        LDI 0b01111111\n        DIR                 ; P0…P6 — outputs to the segments\n        LDI 0b00001111\n        DIRB                ; P8…P11 — outputs, P12…P15 — inputs\n\nloop:   LDI 1\n        ST 0xF0             ; row mask: a one walks along P8…P11\n        LDI 0\n        ST 0xF1             ; button number\n\nscan:   LD 0xF0\n        OUTB                ; put a one on a single row\n        INB                 ; and look at the columns\n        ANDI 0b11110000\n        JNZ found           ; some column answered\n        LD 0xF1\n        ADDI 4              ; the next row is four buttons further on\n        ST 0xF1\n        LD 0xF0\n        SHL\n        ANDI 0b00001111\n        ST 0xF0\n        JNZ scan            ; rows are not over yet\n        LDI 0\n        OUT                 ; nothing pressed — the display is dark\n        JMP loop\n\n; the answering columns sit in the high nibble, take the lowest\nfound:  SHR\n        SHR\n        SHR\n        SHR\n        ST 0xF2\nseek:   LD 0xF2\n        SHR\n        ST 0xF2\n        JC ready\n        LD 0xF1\n        INC\n        ST 0xF1\n        JMP seek\n\n; the number is known — fetch the glyph from the table\nready:  LD 0xF1\n        ADDI glyphs\n        ST take+1           ; patch the address in the next instruction\ntake:   LD glyphs\n        OUT\n        JMP loop\n\n; glyphs: 0…9, then A b C d E F\nglyphs: DB 0x3F 0x06 0x5B 0x4F\n        DB 0x66 0x6D 0x7D 0x07\n        DB 0x7F 0x6F 0x77 0x7C\n        DB 0x39 0x5E 0x79 0x71',
+    ' 7. ТРИ ВЫЧИСЛИТЕЛЬНЫЕ МАШИНЫ':
+      ' 7. THREE COMPUTING MACHINES',
+    'В наборе их три, и путать их нельзя:':
+      'There are three of them, and they must not be confused:',
+    '  board32  Плата EC-32. Тот же процессор EC-8, но на плате: рядом':
+      '  board32  The EC-32 board. The same EC-8 processor, only on a',
+    '           уже стоят память и расширитель портов, а наружу':
+      '           board: memory and a port expander already sit next to',
+    '           выведены шестнадцать линий P0…P15 двумя портами по':
+      '           it, and sixteen lines P0…P15 come out as two ports of',
+    '           восемь. Это наш аналог готового модуля вроде ESP32.':
+      '           eight. This is our answer to a module like the ESP32.',
+    'Берите cpu8, когда хватает четырёх линий, board32 — когда линий':
+      'Take cpu8 when four lines are enough, board32 when many lines',
+    'нужно много (клавиатура, индикатор без драйвера, десяток':
+      'are needed (a keypad, a display without a driver, a dozen LEDs),',
+    'светодиодов), и cpu_bus, когда человек просит показать настоящую':
+      'and cpu_bus when the person asks to see a real bus, external',
+    'шину, внешнюю память или устройство компьютера.':
+      'memory or how a computer is built.',
+    'Устройство всех трёх машин одно: восемь бит, регистры A и B,':
+      'All three machines are built the same way: eight bits, registers',
+    'флаги нуля (Z) и переноса (C). У EC-8 и платы память своя,':
+      'A and B, zero (Z) and carry (C) flags. EC-8 and the board carry',
+    'у EC-8B — внешняя.':
+      'their own memory, EC-8B uses external memory.',
+    'У платы board32 портов два, по восемь линий в каждом:':
+      'The board32 has two ports, eight lines in each:',
+    '  P0…P7    первый порт  — DIR, OUT, IN':
+      '  P0…P7    first port   — DIR, OUT, IN',
+    '  P8…P15   второй порт  — DIRB, OUTB, INB':
+      '  P8…P15   second port  — DIRB, OUTB, INB',
+    'Работают они одинаково, просто команды разные. У cpu8 и cpu_bus':
+      'They work alike, only the instructions differ. cpu8 and cpu_bus',
+    'второго порта нет, и команды OUTB, INB, DIRB там бесполезны.':
+      'have no second port, so OUTB, INB and DIRB are useless there.',
+    '«метка+N» — это адрес на N байт дальше метки. Так правят операнд':
+      '«label+N» is the address N bytes past the label. That is how a',
+    'у своей же команды и достают байт из таблицы по номеру:':
+      'program patches its own operand and picks a table byte by number:',
+    '  LD номер / ADDI таблица / ST взять+1 / взять: LD таблица':
+      '  LD number / ADDI table / ST take+1 / take: LD table',
+    'Первый байт команды — код, второй — операнд, поэтому и +1.':
+      'The opcode byte comes first, the operand second — hence the +1.',
+    'У микроконтроллера EC-8 всего четыре линии порта. Когда выходов':
+      'The EC-8 microcontroller has only four port lines. When outputs',
+    'не хватает, берут плату board32 с шестнадцатью линиями или те же':
+      'run short, take the board32 with its sixteen lines, or the same',
+    'микросхемы, что и в жизни.':
+      'chips as in real life.',
+    'keypad16 — КЛАВИАТУРА 4×4':
+      'keypad16 — A 4×4 KEYPAD',
+    'Шестнадцать кнопок и восемь выводов: C4, C3, C2, C1, R1, R2, R3,':
+      'Sixteen buttons and eight pins: C4, C3, C2, C1, R1, R2, R3, R4 —',
+    'R4 — это выводы 0…7 по порядку. Кнопка S<n> соединяет ряд':
+      'that is pins 0…7 in that order. Button S<n> joins row',
+    'R((n-1)/4+1) со столбцом C((n-1) mod 4+1): S1 — R1 и C1,':
+      'R((n-1)/4+1) with column C((n-1) mod 4+1): S1 — R1 and C1,',
+    'S6 — R2 и C2, S16 — R4 и C4.':
+      'S6 — R2 and C2, S16 — R4 and C4.',
+    'Опрос: ряды делают выходами, столбцы — входами. Подают единицу':
+      'Scanning: rows are outputs, columns are inputs. Put a one on one',
+    'на один ряд, читают столбцы; если какой-то столбец стал единицей,':
+      'row and read the columns; if a column went high, the button at',
+    'нажата кнопка на их пересечении. Потом единицу переносят на':
+      'their crossing is pressed. Then the one moves on to the next',
+    'следующий ряд. Восемь линий платы board32 как раз для этого:':
+      'row. Eight lines of the board32 are exactly what this takes:',
+    '  board32 11…14 (P8…P11)  →  keypad16 4…7 (R1…R4)   ряды':
+      '  board32 11…14 (P8…P11)  →  keypad16 4…7 (R1…R4)   rows',
+    '  board32 15…18 (P12…P15) →  keypad16 3, 2, 1, 0 (C1…C4)  столбцы':
+      '  board32 15…18 (P12…P15) →  keypad16 3, 2, 1, 0 (C1…C4)  columns',
+    'Подтяжка столбцов не нужна: входы платы уже притянуты к нулю.':
+      'No pull-down is needed: the board inputs are already pulled low.',
+    'Готовый пример — схема «Клавиатура 4×4 и плата EC-32».':
+      'A ready example is the circuit «Keypad 4×4 and the EC-32 board».',
+    '  [ ] линии второго порта (P8…P15) настроены командой DIRB,':
+      '  [ ] the lines of the second port (P8…P15) are set up with',
+    '      а не DIR — и наоборот':
+      '      DIRB, not DIR — and the other way round',
+  });
 })(window);
